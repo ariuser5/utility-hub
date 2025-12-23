@@ -1,3 +1,21 @@
+
+# -----------------------------------------------------------------------------
+# Copy-ToMonthFolder.ps1
+# -----------------------------------------------------------------------------
+# Copies all files from a local source folder to a specified Google Drive folder.
+#
+# Usage:
+#   .\Copy-ToMonthFolder.ps1 -SourceFolder "C:\local\files" -TargetPath "gdrive:path/to/_jan-2025"
+#
+# Parameters:
+#   -SourceFolder   Local folder to copy files from (required)
+#   -TargetPath     Full Google Drive path to copy files to (e.g., gdrive:path/to/_jan-2025)
+#
+# Behavior:
+#   - Validates the source folder exists
+#   - Uses rclone to copy all files (recursively) to the target Google Drive folder
+#   - Prints progress and summary output
+# -----------------------------------------------------------------------------
 param(
     [Parameter(Mandatory=$true)]
     [string]$SourceFolder,
