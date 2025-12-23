@@ -9,5 +9,5 @@ Workspace for CVERK-related automation. Pipelines will live here; the `scripts` 
 
 ## Layout
 
-- `pipelines/` (planned): end-to-end flows for CVERK processing and distribution.
+- `pipelines/`: end-to-end flows for CVERK processing and distribution.
 - `scripts/`: focused helpers that pipelines can compose.

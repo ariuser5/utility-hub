@@ -1,3 +1,25 @@
+<#
+-------------------------------------------------------------------------------
+New-ClientMonthlyReport.ps1
+-------------------------------------------------------------------------------
+Orchestrates the creation of a new monthly report folder on Google Drive and copies template files into it.
+
+Usage:
+    .\New-ClientMonthlyReport.ps1 -RemoteName "gdrive" -DirectoryPath "path/to/dir" [-StartYear 2025] [-NewFolderPrefix "_"]
+
+Parameters:
+    -RemoteName        Name of rclone remote (default: "gdrive")
+    -DirectoryPath     Path on remote where month folders live (required)
+    -StartYear         Year to start searching for missing months (default: current year)
+    -NewFolderPrefix   Prefix for new folders (default: "_")
+
+Behavior:
+    - Calls Ensure-MonthFolder.ps1 to create the next missing month folder (with prefix)
+    - If a folder is created, calls Copy-ToMonthFolder.ps1 to copy template files into it
+    - Template files are sourced from resources/monthly_report_template/
+    - Prints progress and summary output
+-------------------------------------------------------------------------------
+#>
 param(
     [Parameter(Mandatory=$true)]
     [string]$RemoteName = "gdrive",
@@ -6,8 +28,8 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$DirectoryPath,
 
-    # Year to check (default: current year)
-    [int]$Year = (Get-Date).Year,
+    # Start year to check (default: current year)
+    [int]$StartYear = (Get-Date).Year,
 
     # Prefix to use when creating a fresh folder (default: underscore)
     [string]$NewFolderPrefix = "_"
@@ -17,9 +39,9 @@ $ErrorActionPreference = "Stop"
 
 # Paths
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ensureScriptPath = Join-Path $scriptDir "scripts\Ensure-MonthFolder.ps1"
-$copyScriptPath = Join-Path $scriptDir "scripts\Copy-ToMonthFolder.ps1"
-$templateFolder = Join-Path $scriptDir "resources\monthly_report_template"
+$ensureScriptPath = Join-Path $scriptDir "..\scripts\Ensure-MonthFolder.ps1"
+$copyScriptPath = Join-Path $scriptDir "..\scripts\Copy-ToMonthFolder.ps1"
+$templateFolder = Join-Path $scriptDir "..\resources\monthly_report_template"
 
 # Validate scripts exist
 if (-not (Test-Path $ensureScriptPath)) {
@@ -48,7 +70,7 @@ try {
     $ensureOutput = & $ensureScriptPath `
         -RemoteName $RemoteName `
         -DirectoryPath $DirectoryPath `
-        -Year $Year `
+        -StartYear $StartYear `
         -NewFolderPrefix $NewFolderPrefix
     
     $exitCode = $LASTEXITCODE
