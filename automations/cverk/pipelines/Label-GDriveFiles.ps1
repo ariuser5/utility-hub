@@ -82,6 +82,9 @@ function Resolve-Labels {
         if ($l -match '[\[\]]') {
             throw "Invalid label '$l': labels cannot contain '[' or ']'."
         }
+		if ($l -notmatch '^[a-zA-Z0-9_-]+$') {
+			throw "Invalid label '$l': labels can only contain alphanumeric characters, hyphens, and underscores."
+		}
         $l
     } | Select-Object -Unique
 
@@ -199,9 +202,10 @@ $resolvedLabels = Resolve-Labels -InlineLabels $Labels -LabelsFile $LabelsFilePa
 $anyBracketLabelRegex = [regex]'^\[[^\]]+\]\s*'
 
 $escapedLabels = $resolvedLabels | ForEach-Object { [regex]::Escape($_) }
+$pattern = "^\[(?:$($escapedLabels -join '|'))\]\s+"
 $allowedLabelsRegex = $null
 if ($escapedLabels -and $escapedLabels.Count -gt 0) {
-    $allowedLabelsRegex = [regex]::new("^\\[(?:$($escapedLabels -join '|'))\\]\\s+", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $allowedLabelsRegex = [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
 }
 
 $excludeRegexObj = $null
@@ -231,7 +235,7 @@ try {
 
 # Build existing basename set for collision detection
 $existingNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-foreach ($f in $files) {
+foreach ($f in $files) {	
     $relPath = $null
     if ($f.PSObject.Properties.Name -contains 'Path' -and $f.Path) {
         $relPath = $f.Path
@@ -256,7 +260,7 @@ foreach ($f in $files) {
 
     $basename = if ($relPath) { Split-Path -Path $relPath -Leaf } else { $null }
     if (-not $basename) { continue }
-
+	
     # Skip already labeled ONLY if it matches one of the configured labels.
     # If we can't build the configured-label regex for some reason, fall back to any "[...]" prefix.
     if (($allowedLabelsRegex -and $allowedLabelsRegex.IsMatch($basename)) -or (-not $allowedLabelsRegex -and $anyBracketLabelRegex.IsMatch($basename))) {
