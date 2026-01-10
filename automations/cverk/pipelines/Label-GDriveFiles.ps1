@@ -305,6 +305,105 @@ function Read-RebaseTodo {
     return [pscustomobject]@{ Mode = 'apply'; Ops = $ops }
 }
 
+function Test-RebaseTodoOps {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]]$Ops,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$ItemByBasename,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$ResolvedLabels
+    )
+
+    foreach ($op in $Ops) {
+        $basename = $op.Basename
+        if (-not $ItemByBasename.ContainsKey($basename)) {
+            return [pscustomobject]@{ IsValid = $false; Error = "Todo references unknown file '$basename' (it may have been renamed/removed)." }
+        }
+
+        $action = $op.Action
+        if ($action -match '^\d+$') {
+            $action = "label:$action"
+        }
+
+        if ($action -ieq 'p' -or $action -ieq 'pick') { continue }
+        if ($action -ieq 's' -or $action -ieq 'skip') { continue }
+
+        if ($action -ieq 'label') {
+            return [pscustomobject]@{ IsValid = $false; Error = "Invalid action 'label' for '$basename'. Use 'label:<LABEL> $basename' or 'label:<N> $basename'." }
+        }
+
+        if ($action -match '^label:(?<lbl>.+)$') {
+            $lbl = $Matches['lbl'].Trim()
+            if (-not $lbl) {
+                return [pscustomobject]@{ IsValid = $false; Error = "Invalid action '$action' for '$basename': missing label after 'label:'." }
+            }
+
+            if ($lbl -match '^\d+$') {
+                $idx = [int]$lbl
+                if ($idx -lt 1 -or $idx -gt $ResolvedLabels.Count) {
+                    return [pscustomobject]@{ IsValid = $false; Error = "Label index '$lbl' out of range for '$basename'. Valid range: 1..$($ResolvedLabels.Count)" }
+                }
+                continue
+            }
+
+            if ($ResolvedLabels -notcontains $lbl) {
+                return [pscustomobject]@{ IsValid = $false; Error = "Label '$lbl' in todo is not in configured labels. Use one of: 1..$($ResolvedLabels.Count) or: $($ResolvedLabels -join ', ')" }
+            }
+
+            continue
+        }
+
+        return [pscustomobject]@{ IsValid = $false; Error = "Unknown action '$action' for '$basename'. Allowed: pick|p, skip|s, label:<LABEL>, label:<N>, or <N>." }
+    }
+
+    return [pscustomobject]@{ IsValid = $true }
+}
+
+function Write-RebaseTodoErrorHeader {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TodoPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ErrorMessage
+    )
+
+    $lines = Get-Content -LiteralPath $TodoPath -ErrorAction Stop
+
+    $begin = '# ERROR-BEGIN'
+    $end = '# ERROR-END'
+
+    $beginIndex = -1
+    $endIndex = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($beginIndex -lt 0 -and $lines[$i].Trim() -eq $begin) { $beginIndex = $i; continue }
+        if ($beginIndex -ge 0 -and $lines[$i].Trim() -eq $end) { $endIndex = $i; break }
+    }
+
+    if ($beginIndex -ge 0 -and $endIndex -ge $beginIndex) {
+        if ($beginIndex -eq 0) {
+            $lines = $lines[($endIndex + 1)..($lines.Count - 1)]
+        } else {
+            $before = $lines[0..($beginIndex - 1)]
+            $after = if ($endIndex + 1 -le ($lines.Count - 1)) { $lines[($endIndex + 1)..($lines.Count - 1)] } else { @() }
+            $lines = @($before + $after)
+        }
+    }
+
+    $header = @(
+        $begin,
+        "# ERROR: $ErrorMessage",
+        "# Fix the todo and save+close to continue.",
+        $end,
+        "#"
+    )
+
+    Set-Content -LiteralPath $TodoPath -Value ($header + $lines) -Encoding UTF8
+}
+
 function Invoke-InteractiveForItem {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -676,9 +775,16 @@ if ($AutoLabel) {
 $tmpTodo = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("utility-hub-label-gdrivefiles-{0}.todo" -f ([guid]::NewGuid().ToString('N')))
 $resetCount = 0
 
+$todoInitialized = $false
+$regenerateTodo = $true
+
 while ($true) {
-    $todoText = New-RebaseTodoText -Items $includedItems -Labels $resolvedLabels -AllowedLabelsRegex $allowedLabelsRegex
-    Set-Content -LiteralPath $tmpTodo -Value $todoText -Encoding UTF8
+    if ($regenerateTodo -or -not $todoInitialized) {
+        $todoText = New-RebaseTodoText -Items $includedItems -Labels $resolvedLabels -AllowedLabelsRegex $allowedLabelsRegex
+        Set-Content -LiteralPath $tmpTodo -Value $todoText -Encoding UTF8
+        $todoInitialized = $true
+        $regenerateTodo = $false
+    }
 
     Invoke-Editor -FilePath $tmpTodo
 
@@ -693,19 +799,30 @@ while ($true) {
         if ($resetCount -ge 5) {
             throw "Too many resets; exiting."
         }
+        $regenerateTodo = $true
         continue
     }
+
+    # Validate todo; on errors, reopen editor with error prepended, preserving user's current todo content.
+    $ops = $parsed.Ops
+    if (-not $ops -or $ops.Count -eq 0) {
+        Write-RebaseTodoErrorHeader -TodoPath $tmpTodo -ErrorMessage "Todo is empty. Add at least one action line or write 'abort'."
+        continue
+    }
+
+    $itemByBasename = @{}
+    foreach ($it in $includedItems) { $itemByBasename[$it.Basename] = $it }
+
+    $validation = Test-RebaseTodoOps -Ops $ops -ItemByBasename $itemByBasename -ResolvedLabels $resolvedLabels
+    if (-not $validation.IsValid) {
+        Write-RebaseTodoErrorHeader -TodoPath $tmpTodo -ErrorMessage $validation.Error
+        continue
+    }
+
     break
 }
 
-$ops = $parsed.Ops
-if (-not $ops -or $ops.Count -eq 0) {
-    Write-Host "No actions specified (todo was empty)." -ForegroundColor Yellow
-    Remove-Item -LiteralPath $tmpTodo -ErrorAction SilentlyContinue
-    exit 0
-}
-
-# Validate and map ops to existing items
+# Map ops to existing items (validated already)
 $itemByBasename = @{}
 foreach ($it in $includedItems) { $itemByBasename[$it.Basename] = $it }
 
