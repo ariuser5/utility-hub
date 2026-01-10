@@ -1,12 +1,4 @@
 <#
-TODO:
- - Implement a new interactive batch mode, that operates just like git's interactive rebase,
-   allowing the user to pick actions (label, skip, open, quit) for each file in sequence.
-   For files the "open" or if labeling failed, the batch interactive mode should run again,
-   but skipping already-processed files.
-#>
-
-<#
 -------------------------------------------------------------------------------
 Label-GDriveFiles.ps1
 -------------------------------------------------------------------------------
@@ -16,7 +8,7 @@ Interactively adds a bracketed label prefix to files in a Google Drive folder
 Key behaviors:
   - Top-level files only (no recursion)
   - Never changes sharing permissions
-        - Skips already-labeled files only when the label is one of the configured labels
+  - Skips already-labeled files only when the label is one of the configured labels
   - Supports an optional exclude regex (basenames only)
   - Auto-suffixes on name collisions: "(2)", "(3)", ...
   - Can open the selected file in the browser (Drive UI URL based on item ID)
