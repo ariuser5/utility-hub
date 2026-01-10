@@ -211,16 +211,21 @@ function New-RebaseTodoText {
     $null = $sb.AppendLine("# utility-hub: Label-GDriveFiles todo")
     $null = $sb.AppendLine("#")
     $null = $sb.AppendLine("# Commands:")
-    $null = $sb.AppendLine("#   pick <filename>           = open interactive prompt for this file")
-    $null = $sb.AppendLine("#   skip <filename>           = do nothing")
-    $null = $sb.AppendLine("#   label:<LABEL> <filename>  = apply that label without prompting")
+    $null = $sb.AppendLine("#   pick|p <filename>             = open interactive prompt for this file")
+    $null = $sb.AppendLine("#   skip|s <filename>             = do nothing")
+    $null = $sb.AppendLine("#   label:<LABEL> <filename>      = apply that label without prompting")
+    $null = $sb.AppendLine("#   label:<N> <filename>          = apply label number N (1-based)")
+    $null = $sb.AppendLine("#   <N> <filename>                = shorthand for label:<N>")
     $null = $sb.AppendLine("#")
     $null = $sb.AppendLine("# Special:")
     $null = $sb.AppendLine("#   abort                     = exit without making changes")
     $null = $sb.AppendLine("#   reset                     = regenerate defaults and reopen editor")
     $null = $sb.AppendLine("#")
     $null = $sb.AppendLine("# Configured labels:")
-    $null = $sb.AppendLine("#   $($Labels -join ', ')")
+    for ($i = 0; $i -lt $Labels.Count; $i++) {
+        $n = $i + 1
+        $null = $sb.AppendLine("#   $n) $($Labels[$i])")
+    }
     $null = $sb.AppendLine("#")
     $null = $sb.AppendLine("# Default: unlabeled => pick, already-labeled (configured) => skip")
     $null = $sb.AppendLine("#")
@@ -230,7 +235,7 @@ function New-RebaseTodoText {
         $defaultAction = if ($AllowedLabelsRegex -and $AllowedLabelsRegex.IsMatch($basename)) { 'skip' } else { 'pick' }
         $escapedName = $basename -replace '\\', '\\\\'
         $escapedName = $escapedName -replace '"', '\"'
-            $null = $sb.AppendLine($defaultAction + ' "' + $escapedName + '"')
+        $null = $sb.AppendLine($defaultAction + ' "' + $escapedName + '"')
     }
 
     return $sb.ToString()
@@ -716,12 +721,16 @@ foreach ($op in $ops) {
     }
 
     $action = $op.Action
-    if ($action -ieq 'skip') {
+    if ($action -match '^\d+$') {
+        $action = "label:$action"
+    }
+
+    if ($action -ieq 's' -or $action -ieq 'skip') {
         $skipped++
         continue
     }
 
-    if ($action -ieq 'pick') {
+    if ($action -ieq 'p' -or $action -ieq 'pick') {
         $toPick.Add($itemByBasename[$basename]) | Out-Null
         continue
     }
@@ -729,6 +738,14 @@ foreach ($op in $ops) {
     if ($action -match '^label:(?<lbl>.+)$') {
         $lbl = $Matches['lbl'].Trim()
         if (-not $lbl) { throw "Invalid action '$action' for '$basename': missing label after 'label:'" }
+
+        if ($lbl -match '^\d+$') {
+            $idx = [int]$lbl
+            if ($idx -lt 1 -or $idx -gt $resolvedLabels.Count) {
+                throw "Label index '$lbl' out of range for '$basename'. Valid range: 1..$($resolvedLabels.Count)"
+            }
+            $lbl = $resolvedLabels[$idx - 1]
+        }
 
         # Enforce label is from configured list
         if ($resolvedLabels -notcontains $lbl) {
