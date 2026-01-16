@@ -12,18 +12,28 @@ PowerShell scripts for Google Drive tasks.
 
 ### Archive-GDriveFolder.ps1
 
-Archives all files from a Google Drive folder to a local ZIP file.
+Archives files from a Google Drive folder to a local archive.
 
 **Usage:**
 ```powershell
-.\automations\gdrive\scripts\Archive-GDriveFolder.ps1 -FolderPath "MyFolder/Documents"
-.\automations\gdrive\scripts\Archive-GDriveFolder.ps1 -FolderPath "Reports" -FilePattern "*.pdf" -OutputPath ".\backup.zip"
+.\automations\gdrive\Archive-GDriveFolder.ps1 -FolderPath "MyFolder/Documents"
+.\automations\gdrive\Archive-GDriveFolder.ps1 -FolderPath "Reports" -FilePattern "*.pdf" -OutputPath ".\backup.zip"
+
+# 7z (requires 7-Zip)
+.\automations\gdrive\Archive-GDriveFolder.ps1 -FolderPath "Reports" -FilePattern "*.pdf" -ArchiveExtension "7z" -OutputPath ".\reports.7z"
+
+# Files labeled like "[INVOICE] ..." (FileNames treats brackets literally; '*' is a wildcard)
+.\automations\gdrive\Archive-GDriveFolder.ps1 -FolderPath "clients/acme/inbox" -FileNames "[INVOICE] *" -OutputPath ".\invoices.zip"
 ```
 
 **Parameters:**
 - `-RemoteName`: rclone remote name (default: "gdrive")
 - `-FolderPath`: Path to the Google Drive folder (required)
+- `-FileNames`: Optional selectors (exact names or `*`/`?` wildcards; brackets are literal). When set, ignores `-FilePattern`/`-ExcludePattern`.
 - `-FilePattern`: File pattern to match (default: "*")
+- `-ExcludePattern`: Exclude pattern (optional)
+- `-ArchiveExtension`: zip|7z|tar|tar.gz|tgz (default: zip)
+- `-SevenZipExe`: 7-Zip executable name/path (default: `7z`)
 - `-OutputPath`: Local path for the archive (default: auto-generated with timestamp)
 
 **Dependencies:**
@@ -37,9 +47,9 @@ Uploads a local file to a destination folder on Google Drive.
 
 **Usage:**
 ```powershell
-.\automations\gdrive\scripts\Upload-ToGDrive.ps1 -DestinationPath "Backups" -LocalFilePath ".\archive.zip"
-.\automations\gdrive\scripts\Upload-ToGDrive.ps1 -DestinationPath "Backups" -LocalFilePath ".\archive.zip" -Overwrite
-.\automations\gdrive\scripts\Upload-ToGDrive.ps1 -DestinationPath "Backups" -LocalFilePath ".\archive.zip" -NoCreate
+.\automations\gdrive\Upload-ToGDrive.ps1 -DestinationPath "Backups" -LocalFilePath ".\archive.zip"
+.\automations\gdrive\Upload-ToGDrive.ps1 -DestinationPath "Backups" -LocalFilePath ".\archive.zip" -Overwrite
+.\automations\gdrive\Upload-ToGDrive.ps1 -DestinationPath "Backups" -LocalFilePath ".\archive.zip" -NoCreate
 ```
 
 **Parameters:**

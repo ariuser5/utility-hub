@@ -41,3 +41,18 @@ Examples (PowerShell):
 
 - `pipelines/`: end-to-end flows for CVERK processing and distribution.
 - `scripts/`: focused helpers that pipelines can compose.
+
+## Scripts
+
+### Archive-GDriveFolderByLabel.ps1
+
+Creates one archive per label for top-level files in a Google Drive folder (labels like `[INVOICE] file.pdf`) and uploads the archives back to Google Drive.
+
+Examples:
+
+- Create ZIP archives under `<FolderPath>/archives`:
+	- `./scripts/Archive-GDriveFolderByLabel.ps1 -FolderPath "clients/acme/inbox"`
+- Use 7z:
+	- `./scripts/Archive-GDriveFolderByLabel.ps1 -FolderPath "clients/acme/inbox" -ArchiveExtension 7z`
+- Use tar.gz and upload elsewhere:
+	- `./scripts/Archive-GDriveFolderByLabel.ps1 -FolderPath "clients/acme/inbox" -ArchiveExtension tar.gz -ArchiveDestinationPath "clients/acme/archives"`
