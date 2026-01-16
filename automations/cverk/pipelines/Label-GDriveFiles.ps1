@@ -249,10 +249,37 @@ function Invoke-Editor {
         if ($LASTEXITCODE -ne 0) {
             throw ("Editor exited with code {0} ({1})" -f $LASTEXITCODE, $cmd.Exe)
         }
-        return
+        return [pscustomobject]@{ Mode = 'closed' }
     }
 
-    Start-Process -FilePath $cmd.Exe -ArgumentList $cmd.ArgumentList -Wait | Out-Null
+    $proc = Start-Process -FilePath $cmd.Exe -ArgumentList $cmd.ArgumentList -PassThru
+
+    # Wait loop with manual override:
+    #  - C = continue now, using current file contents, leaving editor open
+    #  - Q = abort script (no changes)
+    Write-Host "Waiting for editor... (press 'c' to continue now, 'q' to abort)" -ForegroundColor DarkGray
+
+    while ($true) {
+        if ($proc -and $proc.HasExited) {
+            return [pscustomobject]@{ Mode = 'closed' }
+        }
+
+        try {
+            if ([Console]::KeyAvailable) {
+                $keyInfo = [Console]::ReadKey($true)
+                switch ($keyInfo.Key) {
+                    'C' { return [pscustomobject]@{ Mode = 'continue' } }
+                    'Q' { return [pscustomobject]@{ Mode = 'abort' } }
+                }
+            }
+        } catch {
+            # Some hosts may not support KeyAvailable; fall back to normal blocking wait.
+            Wait-Process -Id $proc.Id -ErrorAction SilentlyContinue
+            return [pscustomobject]@{ Mode = 'closed' }
+        }
+
+        Start-Sleep -Milliseconds 200
+    }
 }
 
 function New-RebaseTodoText {
@@ -846,7 +873,12 @@ while ($true) {
         $regenerateTodo = $false
     }
 
-    Invoke-Editor -FilePath $tmpTodo
+    $editResult = Invoke-Editor -FilePath $tmpTodo
+    if ($editResult -and $editResult.Mode -eq 'abort') {
+        Write-Host "Aborted (no changes made)." -ForegroundColor Yellow
+        Remove-Item -LiteralPath $tmpTodo -ErrorAction SilentlyContinue
+        exit 0
+    }
 
     $parsed = Read-RebaseTodo -TodoPath $tmpTodo
     if ($parsed.Mode -eq 'abort') {

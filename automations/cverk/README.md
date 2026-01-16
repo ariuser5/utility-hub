@@ -26,6 +26,11 @@ Wait behavior details:
 - gVim: if you set `UTILITY_HUB_EDITOR` to `gvim`, `-f` is ensured automatically (foreground), so the pipeline resumes when you close the file.
 - Notepad: the default fallback; waits until the Notepad process exits (tabbed Notepad won’t resume on just closing the tab).
 
+While the pipeline is waiting for a GUI editor to close, you can use these shortcuts in the same terminal:
+
+- Press `c` to continue immediately using the current contents of the todo file (leaves the editor open).
+- Press `q` to abort the pipeline immediately (no changes made; leaves the editor open).
+
 Examples (PowerShell):
 
 - For the current session: `$env:UTILITY_HUB_EDITOR = 'code --wait'`
