@@ -137,51 +137,102 @@ function Split-CommandLine {
     return ,$tokens.ToArray()
 }
 
+function Test-ExecutableAvailable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Exe
+    )
+
+    if (-not $Exe) { return $false }
+
+    # If caller provided a path, test that it exists; otherwise use PATH resolution.
+    if ($Exe -match '^[a-zA-Z]:\\' -or $Exe.Contains('\\') -or $Exe.Contains('/')) {
+        return (Test-Path -LiteralPath $Exe -PathType Leaf)
+    }
+
+    return ($null -ne (Get-Command $Exe -ErrorAction SilentlyContinue))
+}
+
 function Resolve-EditorCommand {
     param(
         [Parameter(Mandatory = $true)]
         [string]$FilePath
     )
 
-    $editorCandidate = $null
+    $fallbackCandidates = @(
+        'notepad.exe'
+    )
+
+    $candidateLines = New-Object System.Collections.Generic.List[string]
+    $userSpecifiedSource = $null
+    $userSpecifiedCommand = $null
+
     foreach ($envName in @('UTILITY_HUB_EDITOR', 'VISUAL', 'EDITOR')) {
         $val = [Environment]::GetEnvironmentVariable($envName)
         if ($val -and $val.Trim()) {
-            $editorCandidate = $val.Trim()
+            $userSpecifiedSource = $envName
+            $userSpecifiedCommand = $val.Trim()
+            $candidateLines.Add($userSpecifiedCommand) | Out-Null
             break
         }
     }
 
-    if (-not $editorCandidate) {
-        if (Get-Command code -ErrorAction SilentlyContinue) {
-            $editorCandidate = 'code --wait'
-        } else {
-            $editorCandidate = 'notepad.exe'
+    foreach ($c in $fallbackCandidates) {
+        $candidateLines.Add($c) | Out-Null
+    }
+
+    foreach ($candidate in $candidateLines) {
+        $parts = Split-CommandLine -CommandLine $candidate
+        if (-not $parts -or $parts.Count -lt 1) {
+            continue
+        }
+
+        $exe = $parts[0]
+        if (-not (Test-ExecutableAvailable -Exe $exe)) {
+            if ($userSpecifiedCommand -and $candidate -eq $userSpecifiedCommand) {
+                Write-Host "Editor from ${userSpecifiedSource} not found: ${userSpecifiedCommand}. Falling back..." -ForegroundColor DarkYellow
+            }
+            continue
+        }
+
+        $editorParams = @()
+        if ($parts.Count -gt 1) {
+            $editorParams = $parts[1..($parts.Count - 1)]
+        }
+
+        $exeLower = $exe.ToLowerInvariant()
+
+        if ($exeLower -eq 'code' -or $exeLower.EndsWith('\\code.cmd') -or $exeLower.EndsWith('\\code.exe') -or $exeLower -eq 'code.cmd' -or $exeLower -eq 'code.exe') {
+            if ($editorParams -notcontains '--wait') {
+                $editorParams = @($editorParams + '--wait')
+            }
+        }
+
+        # gVim is a GUI editor; ensure it stays attached until the file is closed.
+        if ($exeLower -eq 'gvim' -or $exeLower.EndsWith('\\gvim.exe') -or $exeLower -eq 'gvim.exe') {
+            if ($editorParams -notcontains '-f') {
+                $editorParams = @($editorParams + '-f')
+            }
+        }
+
+        $isTerminalEditor = $false
+        if ($exeLower -eq 'vim' -or $exeLower.EndsWith('\\vim.exe') -or $exeLower -eq 'vim.exe' -or
+            $exeLower -eq 'nvim' -or $exeLower.EndsWith('\\nvim.exe') -or $exeLower -eq 'nvim.exe' -or
+            $exeLower -eq 'vi' -or $exeLower.EndsWith('\\vi.exe') -or $exeLower -eq 'vi.exe') {
+            $isTerminalEditor = $true
+        }
+
+        return [pscustomobject]@{
+            Exe = $exe
+            ArgumentList = @($editorParams + @($FilePath))
+            RunInTerminal = $isTerminalEditor
         }
     }
 
-    $parts = Split-CommandLine -CommandLine $editorCandidate
-    if (-not $parts -or $parts.Count -lt 1) {
-        $parts = @('notepad.exe')
+    if ($userSpecifiedSource) {
+        Write-Host "Editor from ${userSpecifiedSource} not found: ${userSpecifiedCommand}" -ForegroundColor DarkYellow
     }
-
-    $exe = $parts[0]
-    $editorArguments = @()
-    if ($parts.Count -gt 1) {
-        $editorArguments = $parts[1..($parts.Count - 1)]
-    }
-
-    $exeLower = $exe.ToLowerInvariant()
-    if ($exeLower -eq 'code' -or $exeLower.EndsWith('\\code.cmd') -or $exeLower.EndsWith('\\code.exe') -or $exeLower -eq 'code.cmd' -or $exeLower -eq 'code.exe') {
-        if ($editorArguments -notcontains '--wait') {
-            $editorArguments = @($editorArguments + '--wait')
-        }
-    }
-
-    return [pscustomobject]@{
-        Exe = $exe
-        ArgumentList = @($editorArguments + @($FilePath))
-    }
+    throw "No supported editor found. Set UTILITY_HUB_EDITOR/VISUAL/EDITOR to a valid editor command."
 }
 
 function Invoke-Editor {
@@ -192,6 +243,15 @@ function Invoke-Editor {
 
     $cmd = Resolve-EditorCommand -FilePath $FilePath
     Write-Host "Opening editor: $($cmd.Exe) $($cmd.ArgumentList -join ' ')" -ForegroundColor DarkGray
+
+    if ($cmd.RunInTerminal) {
+        & $cmd.Exe @($cmd.ArgumentList)
+        if ($LASTEXITCODE -ne 0) {
+            throw ("Editor exited with code {0} ({1})" -f $LASTEXITCODE, $cmd.Exe)
+        }
+        return
+    }
+
     Start-Process -FilePath $cmd.Exe -ArgumentList $cmd.ArgumentList -Wait | Out-Null
 }
 
