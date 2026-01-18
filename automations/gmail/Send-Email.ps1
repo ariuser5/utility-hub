@@ -63,8 +63,12 @@ param(
     # Bypass interactive confirmation (for non-interactive orchestrators).
     [switch]$Force,
 
-    # Show BCC recipients and full body in preview (may leak to logs).
-    [switch]$ShowSensitivePreview,
+    # Preview mode:
+    # - masked (default): masks recipients/subject/body preview
+    # - full: shows full recipients/subject/body preview (may leak to logs)
+    # - none: prints no preview
+    [ValidateSet('masked', 'full', 'none')]
+    [string]$PreviewMode = 'masked',
 
     # Max number of body characters to show in preview (default: 200).
     [ValidateRange(0, 20000)]
@@ -587,7 +591,10 @@ try {
     Write-Host "      ✓ Config loaded" -ForegroundColor Green
     Write-Host "" 
 
-    Show-EmailPreview -Config $configObj -BodyChars $PreviewBodyChars -IncludeSensitive ([bool]$ShowSensitivePreview)
+    if ($PreviewMode -ne 'none') {
+        $includeSensitive = ($PreviewMode -eq 'full')
+        Show-EmailPreview -Config $configObj -BodyChars $PreviewBodyChars -IncludeSensitive $includeSensitive
+    }
 
     Write-Host "[2/2] Sending email using mailer..." -ForegroundColor Yellow
 
@@ -607,7 +614,13 @@ try {
         exit 0
     }
 
-    Confirm-Send -Subject ([string]$configObj.subject) -Bypass:$Force
+    $subjectForConfirm = switch ($PreviewMode) {
+        'full' { [string]$configObj.subject }
+        'masked' { Get-MaskedSubject -Subject ([string]$configObj.subject) }
+        default { '<hidden>' }
+    }
+
+    Confirm-Send -Subject $subjectForConfirm -Bypass:$Force
 
     & $mailerPath @mailerArgs
     if ($LASTEXITCODE -ne 0) {
