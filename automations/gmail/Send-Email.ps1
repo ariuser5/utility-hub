@@ -179,8 +179,12 @@ function Get-BodyPreview {
     }
 
     $bodyText = $null
-    if (-not [string]::IsNullOrWhiteSpace($Config.body)) {
-        $bodyText = [string]$Config.body
+    if ($null -ne $Config.body -and -not [string]::IsNullOrWhiteSpace([string]$Config.body)) {
+        if ($Config.body -is [System.Collections.IEnumerable] -and -not ($Config.body -is [string])) {
+            $bodyText = (@($Config.body) | ForEach-Object { [string]$_ }) -join "`r`n"
+        } else {
+            $bodyText = [string]$Config.body
+        }
     } elseif (-not [string]::IsNullOrWhiteSpace($Config.bodyFile)) {
         $bodyText = Get-Content -LiteralPath $Config.bodyFile -Raw -Encoding utf8
     }
@@ -189,7 +193,14 @@ function Get-BodyPreview {
         return ""
     }
 
-    $bodyText = $bodyText -replace "\r\n", "\n"
+    # Some configs may store newlines as literal escape sequences ("\n" / "\r\n").
+    # Interpret those for preview rendering.
+    $bodyText = $bodyText -replace "\\r\\n", "`r`n"
+    $bodyText = $bodyText -replace "\\n", "`r`n"
+    $bodyText = $bodyText -replace "\\r", "`r`n"
+
+    # Normalize all newline variants to CRLF for correct rendering on Windows consoles.
+    $bodyText = $bodyText -replace "\r\n|\n|\r", "`r`n"
     if ($bodyText.Length -le $MaxChars) {
         return $bodyText
     }
@@ -199,7 +210,7 @@ function Get-BodyPreview {
 function ConvertTo-RedactedPreview {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Text
+        [object]$Text
     )
 
     # Redaction strategy:
@@ -208,7 +219,23 @@ function ConvertTo-RedactedPreview {
     #   masking the rest with '*'.
     # This gives a recognizable shape without leaking full content.
 
-    $lines = $Text -split "\n", -1
+    $normalizedText = $null
+    if ($Text -is [System.Collections.IEnumerable] -and -not ($Text -is [string])) {
+        $normalizedText = (@($Text) | ForEach-Object { [string]$_ }) -join "`r`n"
+    } else {
+        $normalizedText = [string]$Text
+    }
+
+    $linesList = New-Object System.Collections.Generic.List[string]
+    $reader = New-Object System.IO.StringReader($normalizedText)
+    while ($true) {
+        $line = $reader.ReadLine()
+        if ($null -eq $line) {
+            break
+        }
+        $linesList.Add($line)
+    }
+    $lines = $linesList.ToArray()
     $outLines = foreach ($line in $lines) {
         if ([string]::IsNullOrWhiteSpace($line)) {
             $line
@@ -254,7 +281,111 @@ function ConvertTo-RedactedPreview {
         ($result -join ' ')
     }
 
-    return ($outLines -join "`n")
+    return $outLines
+}
+
+function Get-MaskedEmailAddress {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Email
+    )
+
+    $trimmed = $Email.Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed) -or -not $trimmed.Contains('@')) {
+        return $Email
+    }
+
+    $parts = $trimmed.Split('@', 2)
+    $user = $parts[0]
+    $domain = $parts[1]
+
+    # Username: show first 2-3 chars + last char
+    if ($user.Length -le 1) {
+        $maskedUser = '*'
+    } elseif ($user.Length -eq 2) {
+        $maskedUser = $user.Substring(0, 1) + '*'
+    } else {
+        $prefixLen = [Math]::Min((Get-Random -Minimum 2 -Maximum 4), $user.Length - 1)
+        $maskedUser = $user.Substring(0, $prefixLen) + ('*' * [Math]::Max(1, $user.Length - $prefixLen - 1)) + $user.Substring($user.Length - 1, 1)
+    }
+
+    # Domain: show first 2 chars of first label + full TLD (e.g. .com / .ro)
+    $labels = @($domain -split '\.')
+    if ($labels.Count -lt 2) {
+        $domainPrefix = $domain
+        $tld = ''
+    } else {
+        # Heuristic for compound TLDs (e.g. co.uk)
+        if ($labels.Count -ge 3 -and $labels[-1].Length -le 3 -and $labels[-2].Length -le 3) {
+            $tld = '.' + $labels[-2] + '.' + $labels[-1]
+        } else {
+            $tld = '.' + $labels[-1]
+        }
+        $domainPrefix = $labels[0]
+    }
+
+    $domainPrefixShown = if ($domainPrefix.Length -le 2) { $domainPrefix } else { $domainPrefix.Substring(0, 2) }
+    $maskedDomain = $domainPrefixShown + ('*' * 3) + $tld
+
+    return "$maskedUser@$maskedDomain"
+}
+
+function Get-MaskedSubject {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Subject
+    )
+
+    $s = $Subject
+    if ([string]::IsNullOrWhiteSpace($s)) {
+        return $s
+    }
+
+    $words = @($s -split '\s+' | Where-Object { $_ -ne '' })
+    if ($words.Count -eq 0) {
+        return $s
+    }
+
+    $maskedWords = New-Object System.Collections.Generic.List[string]
+
+    for ($w = 0; $w -lt $words.Count; $w++) {
+        $word = [string]$words[$w]
+
+        if ($w -eq 0) {
+            # First word: show a few chars from the start
+            $show = [Math]::Min((Get-Random -Minimum 3 -Maximum 6), $word.Length)
+            $maskedWords.Add($word.Substring(0, $show) + ('*' * [Math]::Max(0, $word.Length - $show)))
+            continue
+        }
+
+        if ($word.Length -le 2) {
+            $maskedWords.Add('*' * $word.Length)
+            continue
+        }
+
+        # Next words: reveal two random 2-char pairs, mask the rest
+        $chars = $word.ToCharArray()
+        $mask = @('*') * $chars.Length
+
+        if ($chars.Length -ge 2) {
+            $maxStart = $chars.Length - 2
+            $start1 = Get-Random -Minimum 0 -Maximum ($maxStart + 1)
+            $start2 = Get-Random -Minimum 0 -Maximum ($maxStart + 1)
+            if ([Math]::Abs($start2 - $start1) -lt 2) {
+                $start2 = ($start1 + 2)
+                if ($start2 -gt $maxStart) { $start2 = [Math]::Max(0, $maxStart - 2) }
+            }
+
+            $mask[$start1] = $chars[$start1]
+            $mask[$start1 + 1] = $chars[$start1 + 1]
+            $mask[$start2] = $chars[$start2]
+            $mask[$start2 + 1] = $chars[$start2 + 1]
+        }
+
+        $maskedWords.Add(-join $mask)
+    }
+
+    return ($maskedWords -join ' ')
 }
 
 function Show-EmailPreview {
@@ -277,20 +408,20 @@ function Show-EmailPreview {
     Write-Host "----------------------------------------" -ForegroundColor DarkCyan
     Write-Host "Preview" -ForegroundColor Cyan
     Write-Host "----------------------------------------" -ForegroundColor DarkCyan
-    Write-Host ("To:      " + ($to -join '; ')) -ForegroundColor Gray
+    $toShown = if ($IncludeSensitive) { $to } else { $to | ForEach-Object { Get-MaskedEmailAddress -Email ([string]$_) } }
+    Write-Host ("To:      " + ($toShown -join '; ')) -ForegroundColor Gray
     if ($cc.Count -gt 0) {
-        Write-Host ("Cc:      " + ($cc -join '; ')) -ForegroundColor Gray
+        $ccShown = if ($IncludeSensitive) { $cc } else { $cc | ForEach-Object { Get-MaskedEmailAddress -Email ([string]$_) } }
+        Write-Host ("Cc:      " + ($ccShown -join '; ')) -ForegroundColor Gray
     }
 
     if ($bcc.Count -gt 0) {
-        if ($IncludeSensitive) {
-            Write-Host ("Bcc:     " + ($bcc -join '; ')) -ForegroundColor DarkYellow
-        } else {
-            Write-Host ("Bcc:     <hidden> (" + $bcc.Count + " recipient(s))") -ForegroundColor DarkYellow
-        }
+        $bccShown = if ($IncludeSensitive) { $bcc } else { $bcc | ForEach-Object { Get-MaskedEmailAddress -Email ([string]$_) } }
+        Write-Host ("Bcc:     " + ($bccShown -join '; ')) -ForegroundColor DarkYellow
     }
 
-    Write-Host ("Subject: " + [string]$Config.subject) -ForegroundColor Gray
+    $subjectShown = if ($IncludeSensitive) { [string]$Config.subject } else { Get-MaskedSubject -Subject ([string]$Config.subject) }
+    Write-Host ("Subject: " + $subjectShown) -ForegroundColor Gray
     if ($null -ne $Config.isHtml) {
         Write-Host ("IsHtml:  " + [string]$Config.isHtml) -ForegroundColor Gray
     }
@@ -307,7 +438,10 @@ function Show-EmailPreview {
         if ($IncludeSensitive) {
             Write-Host $preview -ForegroundColor Gray
         } else {
-            Write-Host (ConvertTo-RedactedPreview -Text $preview) -ForegroundColor DarkGray
+            $redactedLines = ConvertTo-RedactedPreview -Text $preview
+            foreach ($redactedLine in $redactedLines) {
+                Write-Host $redactedLine -ForegroundColor DarkGray
+            }
         }
     }
 
