@@ -41,6 +41,9 @@ JSON schema (case-insensitive keys):
 Notes:
   - Specify either body OR bodyFile (mutually exclusive)
   - bodyFile currently supports local paths only
+    - Template expansion: strings may include ${var}. Values are resolved from:
+    1) environment variable VAR
+    2) built-ins: ${today}, ${now}, ${year}, ${month} (current date)
 -------------------------------------------------------------------------------
 #>
 
@@ -76,6 +79,182 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Get-TemplateVariableValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Config,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    # 1) environment variables
+    try {
+        $envValue = (Get-Item -Path ("env:" + $Name) -ErrorAction SilentlyContinue).Value
+        if ($null -ne $envValue -and -not [string]::IsNullOrWhiteSpace([string]$envValue)) {
+            return [string]$envValue
+        }
+    } catch {
+        # ignore
+    }
+
+    # 2) built-ins
+    $now = Get-Date
+    switch -Regex ($Name) {
+        '^(today|date)$' { return $now.ToString('yyyy-MM-dd') }
+        '^now$' { return $now.ToString('s') }
+        '^year$' { return $now.ToString('yyyy') }
+        '^month$' { return $now.ToString('MMMM') }
+    }
+
+    return $null
+}
+
+function Expand-TemplateString {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Config,
+
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [object]$Value,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [System.Collections.Generic.HashSet[string]]$Missing
+    )
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    # Only expand strings.
+    if (-not ($Value -is [string])) {
+        return $Value
+    }
+
+    $s = [string]$Value
+    if ($s -notmatch '\$\{[^}]+\}') {
+        return $s
+    }
+
+    return [regex]::Replace($s, '\$\{([A-Za-z_][A-Za-z0-9_]*)\}', {
+        param($m)
+        $name = $m.Groups[1].Value
+        $resolved = Get-TemplateVariableValue -Config $Config -Name $name
+        if ($null -eq $resolved) {
+            $Missing.Add($name) | Out-Null
+            return $m.Value
+        }
+        return $resolved
+    })
+}
+
+function Expand-TemplateArray {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Config,
+
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [object]$Value,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [System.Collections.Generic.HashSet[string]]$Missing
+    )
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    if ($Value -is [string]) {
+        return (Expand-TemplateString -Config $Config -Value $Value -Missing $Missing)
+    }
+
+    if ($Value -is [System.Collections.IEnumerable] -and -not ($Value -is [string])) {
+        $out = @()
+        foreach ($item in @($Value)) {
+            $out += (Expand-TemplateString -Config $Config -Value $item -Missing $Missing)
+        }
+        return $out
+    }
+
+    return $Value
+}
+
+function Expand-EmailConfigTemplates {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Config
+    )
+
+    $missing = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    # config.variables is intentionally ignored: env vars + built-ins only.
+    if ($null -ne $Config.PSObject.Properties['variables']) {
+        try {
+            $varsProps = @($Config.variables.PSObject.Properties)
+            if ($varsProps.Count -gt 0) {
+                Write-Host "Note: 'variables' field is present in config but is ignored. Use environment variables (or built-ins like ${month})." -ForegroundColor DarkYellow
+            }
+        } catch {
+            Write-Host "Note: 'variables' field is present in config but is ignored." -ForegroundColor DarkYellow
+        }
+    }
+
+    function Get-ConfigProp {
+        param([object]$Obj, [string]$Name)
+        $p = $Obj.PSObject.Properties | Where-Object { $_.Name -ieq $Name } | Select-Object -First 1
+        if ($null -eq $p) { return $null }
+        return $p.Value
+    }
+
+    function Set-ConfigProp {
+        param([object]$Obj, [string]$Name, [object]$Val)
+        $Obj | Add-Member -MemberType NoteProperty -Name $Name -Value $Val -Force
+    }
+
+    # recipients
+    Set-ConfigProp -Obj $Config -Name 'to' -Val (Expand-TemplateArray -Config $Config -Value (Get-ConfigProp -Obj $Config -Name 'to') -Missing $missing)
+    Set-ConfigProp -Obj $Config -Name 'cc' -Val (Expand-TemplateArray -Config $Config -Value (Get-ConfigProp -Obj $Config -Name 'cc') -Missing $missing)
+    Set-ConfigProp -Obj $Config -Name 'bcc' -Val (Expand-TemplateArray -Config $Config -Value (Get-ConfigProp -Obj $Config -Name 'bcc') -Missing $missing)
+
+    # subject/body
+    Set-ConfigProp -Obj $Config -Name 'subject' -Val (Expand-TemplateString -Config $Config -Value (Get-ConfigProp -Obj $Config -Name 'subject') -Missing $missing)
+    Set-ConfigProp -Obj $Config -Name 'body' -Val (Expand-TemplateArray -Config $Config -Value (Get-ConfigProp -Obj $Config -Name 'body') -Missing $missing)
+    Set-ConfigProp -Obj $Config -Name 'bodyFile' -Val (Expand-TemplateString -Config $Config -Value (Get-ConfigProp -Obj $Config -Name 'bodyFile') -Missing $missing)
+
+    # attachments
+    Set-ConfigProp -Obj $Config -Name 'attachments' -Val (Expand-TemplateArray -Config $Config -Value (Get-ConfigProp -Obj $Config -Name 'attachments') -Missing $missing)
+
+    if ($missing.Count -gt 0) {
+        Write-Host ("Warning: Unresolved template variables: " + (($missing | Sort-Object) -join ', ') + ". Leaving placeholders as-is.") -ForegroundColor DarkYellow
+    }
+}
+
+function Write-ExpandedConfigFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Config,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    # Create a plain object excluding 'variables' so mailer isn't exposed to unknown fields.
+    $payload = @{}
+    foreach ($p in $Config.PSObject.Properties) {
+        if ($p.Name -ieq 'variables') {
+            continue
+        }
+        $payload[$p.Name] = $p.Value
+    }
+
+    $json = $payload | ConvertTo-Json -Depth 20
+    Set-Content -LiteralPath $Path -Value $json -Encoding utf8
+}
 
 function Resolve-MailerCommand {
     param(
@@ -537,7 +716,9 @@ function Confirm-Send {
 }
 
 $tempDir = $null
+$tempDirOwned = $false
 $localConfigPath = $null
+$expandedConfigPath = $null
 $configObj = $null
 
 Write-Host "========================================" -ForegroundColor Cyan
@@ -552,6 +733,7 @@ try {
 
         Write-Host "[1/2] Reading config from filesystem..." -ForegroundColor Yellow
         $configObj = Read-JsonFileStrict -Path $localConfigPath
+        Expand-EmailConfigTemplates -Config $configObj
         Test-EmailConfig -Config $configObj -ConfigFilePath $localConfigPath
     } else {
         Write-Host "[1/2] Acquiring config from Google Drive (rclone)..." -ForegroundColor Yellow
@@ -573,6 +755,7 @@ try {
         }
 
         $tempDir = Join-Path $env:TEMP ("send-email-" + [Guid]::NewGuid().ToString('N'))
+        $tempDirOwned = $true
         New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
         $localConfigPath = Join-Path $tempDir "email-config.json"
 
@@ -585,8 +768,19 @@ try {
         }
 
         $configObj = Read-JsonFileStrict -Path $localConfigPath
+        Expand-EmailConfigTemplates -Config $configObj
         Test-EmailConfig -Config $configObj -ConfigFilePath $localConfigPath
     }
+
+    # Always write an expanded config copy for mailer (never mutate the original file on disk).
+    if ($null -eq $tempDir) {
+        $tempDir = Join-Path $env:TEMP ("send-email-" + [Guid]::NewGuid().ToString('N'))
+        $tempDirOwned = $true
+        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    }
+    $expandedConfigPath = Join-Path $tempDir "email-config.expanded.json"
+    Write-ExpandedConfigFile -Config $configObj -Path $expandedConfigPath
+    $localConfigPath = $expandedConfigPath
 
     Write-Host "      ✓ Config loaded" -ForegroundColor Green
     Write-Host "" 
@@ -639,7 +833,7 @@ catch {
     exit 1
 }
 finally {
-    if ($UrlType -eq 'gdrive' -and $null -ne $tempDir -and (Test-Path $tempDir)) {
+    if ($tempDirOwned -and $null -ne $tempDir -and (Test-Path $tempDir)) {
         try {
             Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         } catch {
