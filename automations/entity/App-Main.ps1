@@ -48,185 +48,17 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # -----------------------------------------------------------------------------
-# Config (edit defaults here)
-# -----------------------------------------------------------------------------
-
-$Config = [pscustomobject]@{
-    # If you don't pass -Clients/-AccountantRoot, set your defaults here.
-    # Examples:
-    #   AccountantRoot = 'C:\entity\accountant'
-    #   Clients = @(
-    #       'ClientA=C:\entity\clients\ClientA'
-    #       'gdrive:Documents/work/entity/clienti/ClientB'
-    #   )
-    AccountantRoot = ''
-    Clients        = @()
-
-    # Optional: prevent going too deep in previews. 0 = unlimited.
-    PreviewMaxDepth = 0
-}
-
-function Import-EntityConfigJson {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path
-    )
-
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        throw "Config file not found: $Path"
-    }
-
-    $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
-    if (-not $raw -or -not $raw.Trim()) {
-        throw "Config file is empty: $Path"
-    }
-
-    try {
-        return $raw | ConvertFrom-Json -Depth 20 -ErrorAction Stop
-    } catch {
-        throw "Failed to parse JSON config: $Path. $($_.Exception.Message)"
-    }
-}
-
-function Merge-EntityConfig {
-    param(
-        [Parameter(Mandatory = $true)][pscustomobject]$Target,
-        [Parameter(Mandatory = $true)][object]$Source
-    )
-
-    if ($null -eq $Source) { return }
-
-    foreach ($propName in @('AccountantRoot', 'Clients', 'PreviewMaxDepth')) {
-        $p = $Source.PSObject.Properties[$propName]
-        if ($null -ne $p -and $null -ne $p.Value) {
-            $Target.$propName = $p.Value
-        }
-    }
-}
-
-function ConvertTo-ClientMap {
-    param(
-        [Parameter(Mandatory = $true)][AllowNull()]$ClientsValue
-    )
-
-    $map = [ordered]@{}
-    if ($null -eq $ClientsValue) { return $map }
-
-    if ($ClientsValue -is [System.Collections.IDictionary]) {
-        foreach ($k in $ClientsValue.Keys) {
-            $name = ($k ?? '').ToString().Trim()
-            $root = ($ClientsValue[$k] ?? '').ToString().Trim()
-            if (-not $root) { continue }
-            if (-not $name) { $name = Get-AliasFromPath -Path $root }
-            if (-not $name) { continue }
-            $map[$name] = $root
-        }
-        return $map
-    }
-
-    # JSON object becomes PSCustomObject (properties -> values)
-    if ($ClientsValue -is [pscustomobject]) {
-        foreach ($p in $ClientsValue.PSObject.Properties) {
-            $name = ($p.Name ?? '').ToString().Trim()
-            $root = ($p.Value ?? '').ToString().Trim()
-            if (-not $root) { continue }
-            if (-not $name) { $name = Get-AliasFromPath -Path $root }
-            if (-not $name) { continue }
-            $map[$name] = $root
-        }
-        if ($map.Count -gt 0) { return $map }
-        # If it wasn't a client object, fall through and treat as list.
-    }
-
-    $entries = @()
-    if ($ClientsValue -is [string]) {
-        $entries = @($ClientsValue)
-    } elseif ($ClientsValue -is [object[]]) {
-        $entries = @($ClientsValue)
-    } else {
-        $entries = @($ClientsValue)
-    }
-
-    foreach ($entry in $entries) {
-        if ($null -eq $entry) { continue }
-        $s = $entry.ToString().Trim()
-        if (-not $s) { continue }
-
-        $name = ''
-        $root = ''
-
-        $eqIdx = $s.IndexOf('=')
-        if ($eqIdx -gt 0) {
-            $name = $s.Substring(0, $eqIdx).Trim()
-            $root = $s.Substring($eqIdx + 1).Trim()
-        } else {
-            $root = $s
-            $name = Get-AliasFromPath -Path $root
-        }
-
-        if (-not $root) { continue }
-        if (-not $name) { $name = Get-AliasFromPath -Path $root }
-        if (-not $name) { continue }
-
-        $map[$name] = $root
-    }
-
-    return $map
-}
-
-function Merge-Clients {
-    param(
-        [Parameter(Mandatory = $true)][AllowNull()]$BaseClients,
-        [Parameter(Mandatory = $true)][AllowNull()]$OverlayClients
-    )
-
-    $baseMap = ConvertTo-ClientMap -ClientsValue $BaseClients
-    $overlayMap = ConvertTo-ClientMap -ClientsValue $OverlayClients
-
-    $merged = [ordered]@{}
-    foreach ($k in $baseMap.Keys) { $merged[$k] = $baseMap[$k] }
-    foreach ($k in $overlayMap.Keys) { $merged[$k] = $overlayMap[$k] }
-    return $merged
-}
-
-# Load config from JSON (if provided, or if default exists), then apply CLI overrides/merges.
-$defaultStaticDataFile = $null
-if ($env:LOCALAPPDATA) {
-    $defaultStaticDataFile = Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'utility-hub') 'data') 'contacts-data.json'
-}
-
-$resolvedStaticDataFile = $null
-if ($PSBoundParameters.ContainsKey('StaticDataFile')) {
-    $resolvedStaticDataFile = $StaticDataFile
-} elseif ($defaultStaticDataFile -and (Test-Path -LiteralPath $defaultStaticDataFile -PathType Leaf)) {
-    $resolvedStaticDataFile = $defaultStaticDataFile
-}
-
-if ($resolvedStaticDataFile) {
-    $resolvedStaticDataFile = (Resolve-Path -LiteralPath $resolvedStaticDataFile -ErrorAction Stop).Path
-    $jsonConfig = Import-EntityConfigJson -Path $resolvedStaticDataFile
-    Merge-EntityConfig -Target $Config -Source $jsonConfig
-}
-
-$staticDataFileExplicit = $PSBoundParameters.ContainsKey('StaticDataFile')
-
-if ($PSBoundParameters.ContainsKey('AccountantRoot')) {
-    # AccountantRoot is scalar: CLI always wins when provided.
-    $Config.AccountantRoot = $AccountantRoot
-}
-
-if ($PSBoundParameters.ContainsKey('Clients')) {
-    if ($staticDataFileExplicit -and $resolvedStaticDataFile) {
-        # Explicit config path: merge client entries.
-        $Config.Clients = Merge-Clients -BaseClients $Config.Clients -OverlayClients $Clients
-    } else {
-        # No explicit config path: CLI overrides config.
-        $Config.Clients = $Clients
-    }
-}
-
-# -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
+
+$entityConfigScript = Join-Path $PSScriptRoot '.\helpers\EntityConfig.ps1'
+$entityConfigScript = (Resolve-Path -LiteralPath $entityConfigScript -ErrorAction Stop).Path
+. $entityConfigScript
+
+$init = Initialize-EntityConfig -StaticDataFile $StaticDataFile -AccountantRoot $AccountantRoot -Clients $Clients -BoundParameters $PSBoundParameters
+$Config = $init.Config
+$defaultStaticDataFile = $init.DefaultStaticDataFile
+$resolvedStaticDataFile = $init.ResolvedStaticDataFile
 
 function Write-Heading {
     param([Parameter(Mandatory = $true)][string]$Text)
@@ -257,119 +89,6 @@ function Assert-Interactive {
 
 function Request-Quit {
     $script:__ShouldQuit = $true
-}
-
-function Get-AliasFromPath {
-    param([Parameter(Mandatory = $true)][string]$Path)
-
-    $p = ($Path ?? '').Trim()
-    if (-not $p) { return '' }
-
-    # rclone remote spec: remote:path
-    if ($p -match '^[^:]+:(.*)$') {
-        $m = [regex]::Match($p, '^([^:]+):(.*)$')
-        $remote = $m.Groups[1].Value
-        $rest = ($m.Groups[2].Value ?? '').Replace('\\', '/').Trim('/')
-
-        if (-not $rest) {
-            return $remote
-        }
-
-        $segs = $rest.Split('/', [System.StringSplitOptions]::RemoveEmptyEntries)
-        if ($segs.Count -gt 0) { return $segs[$segs.Count - 1] }
-        return $remote
-    }
-
-    # filesystem / generic path
-    $leaf = ''
-    try {
-        $leaf = Split-Path -Path $p -Leaf
-    } catch {
-        $leaf = ''
-    }
-
-    if (-not $leaf) {
-        $pp = $p.Replace('\\', '/').TrimEnd('/')
-        $segs = $pp.Split('/', [System.StringSplitOptions]::RemoveEmptyEntries)
-        if ($segs.Count -gt 0) { return $segs[$segs.Count - 1] }
-    }
-
-    return $leaf
-}
-
-function Resolve-Clients {
-    $results = @()
-
-    $inputVal = $Config.Clients
-    if ($null -eq $inputVal) { return @() }
-
-    if ($inputVal -is [System.Collections.IDictionary]) {
-        foreach ($k in $inputVal.Keys) {
-            $name = ($k ?? '').ToString().Trim()
-            $root = ($inputVal[$k] ?? '').ToString().Trim()
-            if (-not $root) { continue }
-            if (-not $name) { $name = Get-AliasFromPath -Path $root }
-            if (-not $name) { continue }
-            $results += [pscustomobject]@{ Name = $name; Root = $root }
-        }
-        return $results | Sort-Object Name
-    }
-
-    # JSON object (ConvertFrom-Json) becomes PSCustomObject with properties
-    # e.g. { "ClientA": "C:\\path", "ClientB": "gdrive:..." }
-    if ($inputVal -is [pscustomobject]) {
-        foreach ($p in $inputVal.PSObject.Properties) {
-            $name = ($p.Name ?? '').ToString().Trim()
-            $root = ($p.Value ?? '').ToString().Trim()
-            if (-not $root) { continue }
-            if (-not $name) { $name = Get-AliasFromPath -Path $root }
-            if (-not $name) { continue }
-            $results += [pscustomobject]@{ Name = $name; Root = $root }
-        }
-        return $results | Sort-Object Name
-    }
-
-    $entries = @()
-    if ($inputVal -is [string]) {
-        $entries = @($inputVal)
-    } elseif ($inputVal -is [object[]]) {
-        $entries = @($inputVal)
-    } else {
-        $entries = @($inputVal)
-    }
-
-    foreach ($entry in $entries) {
-        if ($null -eq $entry) { continue }
-        $s = $entry.ToString().Trim()
-        if (-not $s) { continue }
-
-        $name = ''
-        $root = ''
-
-        $eqIdx = $s.IndexOf('=')
-        if ($eqIdx -gt 0) {
-            $name = $s.Substring(0, $eqIdx).Trim()
-            $root = $s.Substring($eqIdx + 1).Trim()
-        } else {
-            $root = $s
-            $name = Get-AliasFromPath -Path $root
-        }
-
-        if (-not $root) { continue }
-        if (-not $name) { $name = Get-AliasFromPath -Path $root }
-        if (-not $name) { continue }
-
-        $results += [pscustomobject]@{ Name = $name; Root = $root }
-    }
-
-    # Prevent confusing duplicate display names
-    $dupes = $results | Group-Object Name | Where-Object { $_.Count -gt 1 }
-    if ($dupes) {
-        $names = ($dupes | ForEach-Object { $_.Name }) -join ', '
-        throw "Duplicate client aliases detected: $names"
-    }
-
-    return $results | Sort-Object Name
 }
 
 function Start-Preview {
@@ -473,7 +192,7 @@ function Select-FromList {
 }
 
 function Browse-Clients {
-    $clients = Resolve-Clients
+    $clients = Resolve-Clients -Config $Config
 
     while ($true) {
         Clear-Host
@@ -595,7 +314,7 @@ function Show-Settings {
 
     Write-Info "AccountantRoot: $($Config.AccountantRoot)"
 
-    $clients = Resolve-Clients
+    $clients = Resolve-Clients -Config $Config
     if (-not $clients -or $clients.Count -eq 0) {
         Write-Warn 'Clients: (none configured)'
     } else {
@@ -631,7 +350,7 @@ while ($true) {
     Clear-Host
 
     Write-Heading 'Entity automation entrypoint'
-    $clientCount = (Resolve-Clients).Count
+    $clientCount = (Resolve-Clients -Config $Config).Count
     Write-Info "Clients: $clientCount"
     Write-Host ''
 
