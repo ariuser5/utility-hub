@@ -243,7 +243,7 @@ function Prompt-Choice {
 function Select-FromList {
     param(
         [Parameter(Mandatory = $true)][string]$Title,
-        [Parameter(Mandatory = $true)][object[]]$Items,
+        [Parameter(Mandatory = $true)][AllowNull()][AllowEmptyCollection()][object[]]$Items,
         [Parameter()][string]$ItemLabel = 'item',
         [Parameter()][switch]$AllowQuit
     )
@@ -327,7 +327,12 @@ function Get-PipelineScripts {
         return @()
     }
 
-    return Get-ChildItem -LiteralPath $pipelinesDir -File -Filter '*.ps1' -ErrorAction Stop |
+    $files = @(Get-ChildItem -LiteralPath $pipelinesDir -File -Filter '*.ps1' -ErrorAction Stop)
+    if (-not $files -or $files.Count -eq 0) {
+        return @()
+    }
+
+    return $files |
         Sort-Object Name |
         ForEach-Object {
             [pscustomobject]@{
@@ -369,9 +374,16 @@ function Pipelines-Menu {
         Write-Info 'These are placeholders: open scripts or print suggested commands.'
         Write-Host ''
 
-        $pipelines = Get-PipelineScripts
+        $pipelines = @(Get-PipelineScripts)
+        if (-not $pipelines -or $pipelines.Count -eq 0) {
+            Write-Warn 'No pipelines found.'
+            Write-Host ''
+            Read-Host 'Press Enter to go back'
+            return
+        }
+
         $p = Select-FromList -Title 'Select pipeline' -Items $pipelines -ItemLabel 'pipelines' -AllowQuit
-        if (-not $p) { return }
+        if ($null -eq $p -or -not $p.FullPath) { return }
 
         while ($true) {
             Clear-Host
