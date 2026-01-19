@@ -7,7 +7,7 @@ Interactive entrypoint for entity automations.
 Goals:
     - Read-only navigation/preview of folder structures (interactive, folder-only navigation)
   - Works against local filesystem OR Google Drive via rclone
-  - Provides lightweight “pipeline launcher” placeholders (open or print command)
+    - Provides lightweight “automation launcher” placeholders (open or print command)
 
 Notes:
   - This script intentionally does NOT implement workflow logic (month close, labels,
@@ -216,15 +216,16 @@ function Preview-Accountant {
     Start-Preview -Root $root -Title 'Accountant preview'
 }
 
-function Get-PipelineScripts {
+function Get-AutomationScripts {
     $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
-    $pipelinesDir = Join-Path $repoRoot 'automations\entity\pipelines'
+    # Folder name remains 'pipelines' for now; UI calls these 'Automations'.
+    $automationsDir = Join-Path $repoRoot 'automations\entity\pipelines'
 
-    if (-not (Test-Path -LiteralPath $pipelinesDir -PathType Container)) {
+    if (-not (Test-Path -LiteralPath $automationsDir -PathType Container)) {
         return @()
     }
 
-    $files = @(Get-ChildItem -LiteralPath $pipelinesDir -File -Filter '*.ps1' -ErrorAction Stop)
+    $files = @(Get-ChildItem -LiteralPath $automationsDir -File -Filter '*.ps1' -ErrorAction Stop)
     if (-not $files -or $files.Count -eq 0) {
         return @()
     }
@@ -264,27 +265,27 @@ function Open-InEditor {
     }
 }
 
-function Pipelines-Menu {
+function Automations-Menu {
     while ($true) {
         Clear-Host
-        Write-Heading 'Pipelines'
+        Write-Heading 'Automations'
         Write-Info 'These are placeholders: open scripts or print suggested commands.'
         Write-Host ''
 
-        $pipelines = @(Get-PipelineScripts)
-        if (-not $pipelines -or $pipelines.Count -eq 0) {
-            Write-Warn 'No pipelines found.'
+        $automations = @(Get-AutomationScripts)
+        if (-not $automations -or $automations.Count -eq 0) {
+            Write-Warn 'No automations found.'
             Write-Host ''
             Read-Host 'Press Enter to go back'
             return
         }
 
-        $p = Select-FromList -Title 'Select pipeline' -Items $pipelines -ItemLabel 'pipelines' -AllowQuit
+        $p = Select-FromList -Title 'Select automation' -Items $automations -ItemLabel 'automations' -AllowQuit
         if ($null -eq $p -or -not $p.FullPath) { return }
 
         while ($true) {
             Clear-Host
-            Write-Heading "Pipeline: $($p.Name)"
+            Write-Heading "Automation: $($p.Name)"
             Write-Info "Path: $($p.FullPath)"
             Write-Host ''
 
@@ -356,7 +357,7 @@ while ($true) {
 
     Write-Host '[1] Browse clients (navigation preview)' -ForegroundColor Gray
     Write-Host '[2] Preview accountant (navigation preview)' -ForegroundColor Gray
-    Write-Host '[3] Pipelines (placeholders)' -ForegroundColor Gray
+    Write-Host '[3] Automations (placeholders)' -ForegroundColor Gray
     Write-Host '[4] Settings' -ForegroundColor Gray
     Write-Host '[q] Quit' -ForegroundColor Gray
 
@@ -373,7 +374,7 @@ while ($true) {
         switch ($choice) {
             '1' { Browse-Clients }
             '2' { Preview-Accountant }
-            '3' { Pipelines-Menu }
+            '3' { Automations-Menu }
             '4' { Show-Settings }
             default { Write-Warn 'Invalid selection.'; Start-Sleep -Milliseconds 700 }
         }
