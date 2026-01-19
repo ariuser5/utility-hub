@@ -371,7 +371,9 @@ function Render-SelectorScreen {
         [Parameter(Mandatory = $true)][int]$SelectedIndex,
         [Parameter(Mandatory = $true)][int]$ScrollOffset,
         [Parameter()][int]$MaxDepth,
-        [Parameter()][int]$Depth
+        [Parameter()][int]$Depth,
+        [Parameter()][int]$SpinnerIndex = -1,
+        [Parameter()][int]$SpinnerDots = 0
     )
 
     Clear-Host
@@ -395,7 +397,12 @@ function Render-SelectorScreen {
     $visible = [Math]::Max(3, $windowHeight - $reserved)
 
     if (-not $Entries -or $Entries.Count -eq 0) {
-        Write-Warn '(empty)'
+        if ($SpinnerDots -gt 0) {
+            $d = Clamp-Int -Value $SpinnerDots -Min 1 -Max 3
+            Write-Host ("Fetching" + ('.' * $d)) -ForegroundColor Yellow
+        } else {
+            Write-Warn '(empty)'
+        }
         return
     }
 
@@ -412,7 +419,11 @@ function Render-SelectorScreen {
         $marker = ''
         $markerColor = 'DarkGray'
         if ($isSelected) {
-            if ($e.IsDir) {
+            if ($SpinnerDots -gt 0 -and $i -eq $SpinnerIndex) {
+                $d = Clamp-Int -Value $SpinnerDots -Min 1 -Max 3
+                $marker = (' <-' + ('.' * $d))
+                $markerColor = 'Yellow'
+            } elseif ($e.IsDir) {
                 $marker = ' <-o'
                 $markerColor = 'Green'
             } else {
@@ -449,25 +460,29 @@ function Render-SelectorScreen {
     }
 }
 
-function Render-LoadingScreen {
+function Wait-RcloneJobWithInlineSpinner {
     param(
+        [Parameter(Mandatory = $true)][object]$Job,
         [Parameter(Mandatory = $true)][string]$TitleText,
         [Parameter(Mandatory = $true)][string]$BackendLabel,
         [Parameter(Mandatory = $true)][string]$LocationText,
-        [Parameter(Mandatory = $true)][int]$Dots
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Entries,
+        [Parameter(Mandatory = $true)][int]$SelectedIndex,
+        [Parameter(Mandatory = $true)][int]$ScrollOffset,
+        [Parameter()][int]$MaxDepth,
+        [Parameter()][int]$Depth
     )
 
-    Clear-Host
+    $dots = 1
+    while ($true) {
+        $state = $Job.State
+        if ($state -ne 'Running' -and $state -ne 'NotStarted') { break }
 
-    Write-Heading $TitleText
-    Write-Info "Backend: $BackendLabel"
-    Write-Info "Location: $LocationText"
-    Show-PreviewHelp
-    Write-Host ''
-
-    $d = Clamp-Int -Value $Dots -Min 1 -Max 3
-    $suffix = ('.' * $d)
-    Write-Host ("Loading{0}" -f $suffix) -ForegroundColor Yellow
+        $spinnerIdx = if ($Entries -and $Entries.Count -gt 0) { $SelectedIndex } else { -1 }
+        Render-SelectorScreen -TitleText $TitleText -BackendLabel $BackendLabel -LocationText $LocationText -Entries $Entries -SelectedIndex $SelectedIndex -ScrollOffset $ScrollOffset -MaxDepth $MaxDepth -Depth $Depth -SpinnerIndex $spinnerIdx -SpinnerDots $dots
+        Start-Sleep -Milliseconds 180
+        $dots = ($dots % 3) + 1
+    }
 }
 
 function Convert-RcloneLsfLinesToEntries {
@@ -625,6 +640,10 @@ while ($true) {
     try {
         $backendLabel = Get-BackendLabel -Nav $nav -Remote ($rclone.Remote)
 
+        # Ensure selector state exists (also used for inline spinners during fetch).
+        if ($null -eq $script:__selectedIndex) { $script:__selectedIndex = 0 }
+        if ($null -eq $script:__scrollOffset) { $script:__scrollOffset = 0 }
+
         $cacheKey = if ($nav -eq 'filesystem') {
             "filesystem|$rootFull|$relative"
         } else {
@@ -662,23 +681,17 @@ while ($true) {
                 $locationText = $remoteSpec
                 $depth = (Get-RelSegments -Rel $relative).Count
 
-                # Run the rclone listing in a background job so we can animate a simple loader.
+                # rclone listing (single call). If this is a cache miss, we fetch synchronously here.
                 $job = Start-Job -ScriptBlock {
                     param($spec)
                     & rclone lsf $spec --format p 2>$null
                 } -ArgumentList $remoteSpec
 
-                $dots = 1
-                while ($true) {
-                    $state = $job.State
-                    if ($state -ne 'Running' -and $state -ne 'NotStarted') { break }
-                    Render-LoadingScreen -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Dots $dots
-                    Start-Sleep -Milliseconds 180
-                    $dots = ($dots % 3) + 1
-                }
-
                 $lines = @()
                 try {
+                    # Wait for completion; show inline spinner (if we already have a list) or a small fetching hint.
+                    Wait-RcloneJobWithInlineSpinner -Job $job -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth
+
                     $received = Receive-Job -Job $job -ErrorAction Stop
                     if ($received) {
                         $lines = @($received)
@@ -728,7 +741,38 @@ while ($true) {
         }
 
         if ($key.Character -and ($key.Character -eq 'r' -or $key.Character -eq 'R')) {
-            $forceRefresh = $true
+            if ($nav -eq 'rclone') {
+                # Refresh current location with inline spinner.
+                $pathPart = $rclone.RootPath
+                if ($relative) {
+                    $pathPart = Join-Relative -Base $pathPart -Child $relative
+                }
+                $pathPart = ConvertTo-RclonePath -Path $pathPart
+                $remoteSpec = if ($pathPart) { ('{0}:{1}' -f $rclone.Remote, $pathPart) } else { ('{0}:' -f $rclone.Remote) }
+
+                $job = Start-Job -ScriptBlock {
+                    param($spec)
+                    & rclone lsf $spec --format p 2>$null
+                } -ArgumentList $remoteSpec
+
+                Wait-RcloneJobWithInlineSpinner -Job $job -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth
+
+                $lines = @()
+                try {
+                    $received = Receive-Job -Job $job -ErrorAction Stop
+                    if ($received) { $lines = @($received) }
+                } catch {
+                    $lines = @()
+                } finally {
+                    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+                }
+
+                $newEntries = Convert-RcloneLsfLinesToEntries -Lines $lines -IncludeParent ($relative -ne '')
+                $dirCache[$cacheKey] = [pscustomobject]@{ LocationText = $locationText; Entries = $newEntries; Depth = $depth }
+                $forceRefresh = $false
+            } else {
+                $forceRefresh = $true
+            }
             continue
         }
 
@@ -747,11 +791,43 @@ while ($true) {
             foreach ($s in (Get-RelSegments -Rel $relative)) { $null = $segs.Add([string]$s) }
             if ($segs.Count -gt 0) {
                 $segs.RemoveAt($segs.Count - 1)
-                $relative = Set-RelSegments -Segments $segs.ToArray()
+                $targetRel = Set-RelSegments -Segments $segs.ToArray()
+
+                if ($nav -eq 'rclone') {
+                    $targetKey = "rclone|$($rclone.Remote)|$($rclone.RootPath)|$targetRel"
+                    if (-not $dirCache.ContainsKey($targetKey)) {
+                        $targetPath = $rclone.RootPath
+                        if ($targetRel) { $targetPath = Join-Relative -Base $targetPath -Child $targetRel }
+                        $targetPath = ConvertTo-RclonePath -Path $targetPath
+                        $targetSpec = if ($targetPath) { ('{0}:{1}' -f $rclone.Remote, $targetPath) } else { ('{0}:' -f $rclone.Remote) }
+                        $targetDepth = (Get-RelSegments -Rel $targetRel).Count
+
+                        $job = Start-Job -ScriptBlock {
+                            param($spec)
+                            & rclone lsf $spec --format p 2>$null
+                        } -ArgumentList $targetSpec
+
+                        Wait-RcloneJobWithInlineSpinner -Job $job -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth
+
+                        $lines = @()
+                        try {
+                            $received = Receive-Job -Job $job -ErrorAction Stop
+                            if ($received) { $lines = @($received) }
+                        } catch {
+                            $lines = @()
+                        } finally {
+                            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+                        }
+
+                        $newEntries = Convert-RcloneLsfLinesToEntries -Lines $lines -IncludeParent ($targetRel -ne '')
+                        $dirCache[$targetKey] = [pscustomobject]@{ LocationText = $targetSpec; Entries = $newEntries; Depth = $targetDepth }
+                    }
+                }
+
+                $relative = $targetRel
             }
             $script:__selectedIndex = 0
             $script:__scrollOffset = 0
-            $forceRefresh = $true
             continue
         }
 
@@ -764,11 +840,43 @@ while ($true) {
                 foreach ($s in (Get-RelSegments -Rel $relative)) { $null = $segs.Add([string]$s) }
                 if ($segs.Count -gt 0) {
                     $segs.RemoveAt($segs.Count - 1)
-                    $relative = Set-RelSegments -Segments $segs.ToArray()
+                    $targetRel = Set-RelSegments -Segments $segs.ToArray()
+
+                    if ($nav -eq 'rclone') {
+                        $targetKey = "rclone|$($rclone.Remote)|$($rclone.RootPath)|$targetRel"
+                        if (-not $dirCache.ContainsKey($targetKey)) {
+                            $targetPath = $rclone.RootPath
+                            if ($targetRel) { $targetPath = Join-Relative -Base $targetPath -Child $targetRel }
+                            $targetPath = ConvertTo-RclonePath -Path $targetPath
+                            $targetSpec = if ($targetPath) { ('{0}:{1}' -f $rclone.Remote, $targetPath) } else { ('{0}:' -f $rclone.Remote) }
+                            $targetDepth = (Get-RelSegments -Rel $targetRel).Count
+
+                            $job = Start-Job -ScriptBlock {
+                                param($spec)
+                                & rclone lsf $spec --format p 2>$null
+                            } -ArgumentList $targetSpec
+
+                            Wait-RcloneJobWithInlineSpinner -Job $job -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth
+
+                            $lines = @()
+                            try {
+                                $received = Receive-Job -Job $job -ErrorAction Stop
+                                if ($received) { $lines = @($received) }
+                            } catch {
+                                $lines = @()
+                            } finally {
+                                Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+                            }
+
+                            $newEntries = Convert-RcloneLsfLinesToEntries -Lines $lines -IncludeParent ($targetRel -ne '')
+                            $dirCache[$targetKey] = [pscustomobject]@{ LocationText = $targetSpec; Entries = $newEntries; Depth = $targetDepth }
+                        }
+                    }
+
+                    $relative = $targetRel
                 }
                 $script:__selectedIndex = 0
                 $script:__scrollOffset = 0
-                $forceRefresh = $true
                 continue
             }
 
@@ -785,10 +893,42 @@ while ($true) {
                 continue
             }
             $null = $segs.Add([string]$selected.Name)
-            $relative = Set-RelSegments -Segments $segs.ToArray()
+            $targetRel = Set-RelSegments -Segments $segs.ToArray()
+
+            if ($nav -eq 'rclone') {
+                $targetKey = "rclone|$($rclone.Remote)|$($rclone.RootPath)|$targetRel"
+                if (-not $dirCache.ContainsKey($targetKey)) {
+                    $targetPath = $rclone.RootPath
+                    if ($targetRel) { $targetPath = Join-Relative -Base $targetPath -Child $targetRel }
+                    $targetPath = ConvertTo-RclonePath -Path $targetPath
+                    $targetSpec = if ($targetPath) { ('{0}:{1}' -f $rclone.Remote, $targetPath) } else { ('{0}:' -f $rclone.Remote) }
+                    $targetDepth = (Get-RelSegments -Rel $targetRel).Count
+
+                    $job = Start-Job -ScriptBlock {
+                        param($spec)
+                        & rclone lsf $spec --format p 2>$null
+                    } -ArgumentList $targetSpec
+
+                    Wait-RcloneJobWithInlineSpinner -Job $job -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth
+
+                    $lines = @()
+                    try {
+                        $received = Receive-Job -Job $job -ErrorAction Stop
+                        if ($received) { $lines = @($received) }
+                    } catch {
+                        $lines = @()
+                    } finally {
+                        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+                    }
+
+                    $newEntries = Convert-RcloneLsfLinesToEntries -Lines $lines -IncludeParent ($targetRel -ne '')
+                    $dirCache[$targetKey] = [pscustomobject]@{ LocationText = $targetSpec; Entries = $newEntries; Depth = $targetDepth }
+                }
+            }
+
+            $relative = $targetRel
             $script:__selectedIndex = 0
             $script:__scrollOffset = 0
-            $forceRefresh = $true
             continue
         }
 
