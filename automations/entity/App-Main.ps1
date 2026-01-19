@@ -1,8 +1,8 @@
 <#
 -------------------------------------------------------------------------------
-App-Cverk.ps1
+App-Main.ps1
 -------------------------------------------------------------------------------
-Interactive entrypoint for CVERK automations.
+Interactive entrypoint for entity automations.
 
 Goals:
     - Read-only navigation/preview of folder structures (interactive, folder-only navigation)
@@ -28,7 +28,7 @@ param(
     [string]$StaticDataFile,
 
     # Root folder for accountant.
-    # Can be a filesystem path (e.g., C:\Data\CVERK\accountant) or an rclone remote spec (e.g., gdrive:accountant).
+    # Can be a filesystem path (e.g., C:\Data\entity\accountant) or an rclone remote spec (e.g., gdrive:accountant).
     [Parameter()]
     [string]$AccountantRoot,
 
@@ -54,10 +54,10 @@ $ErrorActionPreference = 'Stop'
 $Config = [pscustomobject]@{
     # If you don't pass -Clients/-AccountantRoot, set your defaults here.
     # Examples:
-    #   AccountantRoot = 'C:\CVERK\accountant'
+    #   AccountantRoot = 'C:\entity\accountant'
     #   Clients = @(
-    #       'ClientA=C:\CVERK\clients\ClientA'
-    #       'gdrive:Documents/work/cverk/clienti/ClientB'
+    #       'ClientA=C:\entity\clients\ClientA'
+    #       'gdrive:Documents/work/entity/clienti/ClientB'
     #   )
     AccountantRoot = ''
     Clients        = @()
@@ -66,7 +66,7 @@ $Config = [pscustomobject]@{
     PreviewMaxDepth = 0
 }
 
-function Import-CverkConfigJson {
+function Import-EntityConfigJson {
     param(
         [Parameter(Mandatory = $true)][string]$Path
     )
@@ -87,7 +87,7 @@ function Import-CverkConfigJson {
     }
 }
 
-function Merge-CverkConfig {
+function Merge-EntityConfig {
     param(
         [Parameter(Mandatory = $true)][pscustomobject]$Target,
         [Parameter(Mandatory = $true)][object]$Source
@@ -203,8 +203,8 @@ if ($PSBoundParameters.ContainsKey('StaticDataFile')) {
 
 if ($resolvedStaticDataFile) {
     $resolvedStaticDataFile = (Resolve-Path -LiteralPath $resolvedStaticDataFile -ErrorAction Stop).Path
-    $jsonConfig = Import-CverkConfigJson -Path $resolvedStaticDataFile
-    Merge-CverkConfig -Target $Config -Source $jsonConfig
+    $jsonConfig = Import-EntityConfigJson -Path $resolvedStaticDataFile
+    Merge-EntityConfig -Target $Config -Source $jsonConfig
 }
 
 $staticDataFileExplicit = $PSBoundParameters.ContainsKey('StaticDataFile')
@@ -499,7 +499,7 @@ function Preview-Accountant {
 
 function Get-PipelineScripts {
     $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
-    $pipelinesDir = Join-Path $repoRoot 'automations\cverk\pipelines'
+    $pipelinesDir = Join-Path $repoRoot 'automations\entity\pipelines'
 
     if (-not (Test-Path -LiteralPath $pipelinesDir -PathType Container)) {
         return @()
@@ -630,7 +630,7 @@ while ($true) {
     if ($script:__ShouldQuit) { break }
     Clear-Host
 
-    Write-Heading 'CVERK automation entrypoint'
+    Write-Heading 'Entity automation entrypoint'
     $clientCount = (Resolve-Clients).Count
     Write-Info "Clients: $clientCount"
     Write-Host ''

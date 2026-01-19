@@ -16,10 +16,10 @@ Supported navigators:
 
 Examples:
   # Local folder
-        ./Preview.ps1 "C:\CVERK\clients"
+    ./Preview.ps1 "C:\Data\clients"
 
   # rclone remote root (full remote spec)
-        ./Preview.ps1 "gdrive:Documents/work/cverk/clienti"
+      ./Preview.ps1 "gdrive:Documents/work/clients"
 -------------------------------------------------------------------------------
 #>
 

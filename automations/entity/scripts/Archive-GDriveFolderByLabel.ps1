@@ -2,7 +2,7 @@
 -------------------------------------------------------------------------------
 Archive-GDriveFolderByLabel.ps1
 -------------------------------------------------------------------------------
-CVERK helper: creates one archive per label for top-level files in a Google Drive
+Helper: creates one archive per label for top-level files in a Google Drive
 folder and uploads the archives back to Google Drive.
 
 Label format matches Label-GDriveFiles.ps1:
@@ -104,7 +104,7 @@ $archiveExt = Convert-ArchiveExtension -Ext $ArchiveExtension
 
 $remoteFolder = "${RemoteName}:${FolderPath}"
 
-Write-Host "Starting CVERK label archive process..." -ForegroundColor Cyan
+Write-Host "Starting label archive process..." -ForegroundColor Cyan
 Write-Host "  Remote folder: $remoteFolder" -ForegroundColor Gray
 Write-Host "  Archive format: $archiveExt" -ForegroundColor Gray
 Write-Host "  Upload to: ${RemoteName}:$ArchiveDestinationPath" -ForegroundColor Gray
@@ -175,7 +175,7 @@ foreach ($g in $groups) {
 $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 
 # Build archives locally, then upload
-$workRoot = Join-Path $env:TEMP ("utility-hub_cverk_label-archive_" + [System.Guid]::NewGuid().ToString())
+$workRoot = Join-Path $env:TEMP ("utility-hub_label-archive_" + [System.Guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $workRoot | Out-Null
 
 try {

@@ -1,6 +1,6 @@
-# cverk automations
+# entity automations
 
-Workspace for CVERK-related automation. Pipelines will live here; the `scripts` folder holds small, reusable bricks those pipelines can call.
+Workspace for entity-related automation. Pipelines will live here; the `scripts` folder holds small, reusable bricks those pipelines can call.
 
 **Prerequisite**
 - rclone (for Google Drive access)
@@ -39,23 +39,23 @@ Examples (PowerShell):
 
 ## Layout
 
-- `pipelines/`: end-to-end flows for CVERK processing and distribution.
+- `pipelines/`: end-to-end flows for entity processing and distribution.
 - `scripts/`: focused helpers that pipelines can compose.
 
 ## Entrypoint
 
-Use [App-Cverk.ps1](automations/cverk/App-Cverk.ps1) as the interactive entrypoint for browsing client/accountant folders (read-only) and jumping into pipelines.
+Use [App-Main.ps1](automations/entity/App-Main.ps1) as the interactive entrypoint for browsing client/accountant folders (read-only) and jumping into pipelines.
 
 Examples:
 
 - Default (loads static data from `%LOCALAPPDATA%\utility-hub\data\contacts-data.json` if it exists):
-	- `./App-Cverk.ps1`
+	- `./App-Main.ps1`
 
 - Provide roots directly:
-	- `./App-Cverk.ps1 -AccountantRoot "C:\\accountant" -Clients @("ClientA=C:\\clients\\ClientA", "gdrive:Documents/work/clienti/ClientB")`
+	- `./App-Main.ps1 -AccountantRoot "C:\\accountant" -Clients @("ClientA=C:\\clients\\ClientA", "gdrive:Documents/work/clienti/ClientB")`
 
 - Provide clients as a hashtable:
-	- `./App-Cverk.ps1 -Clients @{ ClientA = "C:\\clients\\ClientA"; ClientB = "gdrive:Documents/work/clienti/ClientB" }`
+	- `./App-Main.ps1 -Clients @{ ClientA = "C:\\clients\\ClientA"; ClientB = "gdrive:Documents/work/clienti/ClientB" }`
 
 Configure roots:
 
