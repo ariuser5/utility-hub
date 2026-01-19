@@ -1,0 +1,8 @@
+{
+  "AccountantRoot": "C:/accountant",
+  "Clients": {
+    "ClientA": "C:/clients/ClientA",
+    "ClientB": "gdrive:Documents/work/clienti/ClientB"
+  },
+  "PreviewMaxDepth": 0
+}

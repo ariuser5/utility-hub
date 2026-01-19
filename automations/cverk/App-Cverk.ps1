@@ -18,6 +18,15 @@ Notes:
 
 [CmdletBinding()]
 param(
+    # Optional JSON config file.
+    # If not provided, defaults to: %LOCALAPPDATA%\utility-hub\data\contacts-data.json (if it exists).
+    # Precedence rules:
+    #   - If -StaticDataFile is NOT provided: CLI parameters override config values.
+    #   - If -StaticDataFile IS provided: values are merged (for Clients, entries are combined; CLI wins on duplicate aliases).
+    [Parameter()]
+    [Alias('ConfigPath')]
+    [string]$StaticDataFile,
+
     # Root folder for accountant.
     # Can be a filesystem path (e.g., C:\Data\CVERK\accountant) or an rclone remote spec (e.g., gdrive:accountant).
     [Parameter()]
@@ -57,8 +66,163 @@ $Config = [pscustomobject]@{
     PreviewMaxDepth = 0
 }
 
-if ($PSBoundParameters.ContainsKey('AccountantRoot')) { $Config.AccountantRoot = $AccountantRoot }
-if ($PSBoundParameters.ContainsKey('Clients'))        { $Config.Clients = $Clients }
+function Import-CverkConfigJson {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Config file not found: $Path"
+    }
+
+    $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+    if (-not $raw -or -not $raw.Trim()) {
+        throw "Config file is empty: $Path"
+    }
+
+    try {
+        return $raw | ConvertFrom-Json -Depth 20 -ErrorAction Stop
+    } catch {
+        throw "Failed to parse JSON config: $Path. $($_.Exception.Message)"
+    }
+}
+
+function Merge-CverkConfig {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Target,
+        [Parameter(Mandatory = $true)][object]$Source
+    )
+
+    if ($null -eq $Source) { return }
+
+    foreach ($propName in @('AccountantRoot', 'Clients', 'PreviewMaxDepth')) {
+        $p = $Source.PSObject.Properties[$propName]
+        if ($null -ne $p -and $null -ne $p.Value) {
+            $Target.$propName = $p.Value
+        }
+    }
+}
+
+function ConvertTo-ClientMap {
+    param(
+        [Parameter(Mandatory = $true)][AllowNull()]$ClientsValue
+    )
+
+    $map = [ordered]@{}
+    if ($null -eq $ClientsValue) { return $map }
+
+    if ($ClientsValue -is [System.Collections.IDictionary]) {
+        foreach ($k in $ClientsValue.Keys) {
+            $name = ($k ?? '').ToString().Trim()
+            $root = ($ClientsValue[$k] ?? '').ToString().Trim()
+            if (-not $root) { continue }
+            if (-not $name) { $name = Get-AliasFromPath -Path $root }
+            if (-not $name) { continue }
+            $map[$name] = $root
+        }
+        return $map
+    }
+
+    # JSON object becomes PSCustomObject (properties -> values)
+    if ($ClientsValue -is [pscustomobject]) {
+        foreach ($p in $ClientsValue.PSObject.Properties) {
+            $name = ($p.Name ?? '').ToString().Trim()
+            $root = ($p.Value ?? '').ToString().Trim()
+            if (-not $root) { continue }
+            if (-not $name) { $name = Get-AliasFromPath -Path $root }
+            if (-not $name) { continue }
+            $map[$name] = $root
+        }
+        if ($map.Count -gt 0) { return $map }
+        # If it wasn't a client object, fall through and treat as list.
+    }
+
+    $entries = @()
+    if ($ClientsValue -is [string]) {
+        $entries = @($ClientsValue)
+    } elseif ($ClientsValue -is [object[]]) {
+        $entries = @($ClientsValue)
+    } else {
+        $entries = @($ClientsValue)
+    }
+
+    foreach ($entry in $entries) {
+        if ($null -eq $entry) { continue }
+        $s = $entry.ToString().Trim()
+        if (-not $s) { continue }
+
+        $name = ''
+        $root = ''
+
+        $eqIdx = $s.IndexOf('=')
+        if ($eqIdx -gt 0) {
+            $name = $s.Substring(0, $eqIdx).Trim()
+            $root = $s.Substring($eqIdx + 1).Trim()
+        } else {
+            $root = $s
+            $name = Get-AliasFromPath -Path $root
+        }
+
+        if (-not $root) { continue }
+        if (-not $name) { $name = Get-AliasFromPath -Path $root }
+        if (-not $name) { continue }
+
+        $map[$name] = $root
+    }
+
+    return $map
+}
+
+function Merge-Clients {
+    param(
+        [Parameter(Mandatory = $true)][AllowNull()]$BaseClients,
+        [Parameter(Mandatory = $true)][AllowNull()]$OverlayClients
+    )
+
+    $baseMap = ConvertTo-ClientMap -ClientsValue $BaseClients
+    $overlayMap = ConvertTo-ClientMap -ClientsValue $OverlayClients
+
+    $merged = [ordered]@{}
+    foreach ($k in $baseMap.Keys) { $merged[$k] = $baseMap[$k] }
+    foreach ($k in $overlayMap.Keys) { $merged[$k] = $overlayMap[$k] }
+    return $merged
+}
+
+# Load config from JSON (if provided, or if default exists), then apply CLI overrides/merges.
+$defaultStaticDataFile = $null
+if ($env:LOCALAPPDATA) {
+    $defaultStaticDataFile = Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'utility-hub') 'data') 'contacts-data.json'
+}
+
+$resolvedStaticDataFile = $null
+if ($PSBoundParameters.ContainsKey('StaticDataFile')) {
+    $resolvedStaticDataFile = $StaticDataFile
+} elseif ($defaultStaticDataFile -and (Test-Path -LiteralPath $defaultStaticDataFile -PathType Leaf)) {
+    $resolvedStaticDataFile = $defaultStaticDataFile
+}
+
+if ($resolvedStaticDataFile) {
+    $resolvedStaticDataFile = (Resolve-Path -LiteralPath $resolvedStaticDataFile -ErrorAction Stop).Path
+    $jsonConfig = Import-CverkConfigJson -Path $resolvedStaticDataFile
+    Merge-CverkConfig -Target $Config -Source $jsonConfig
+}
+
+$staticDataFileExplicit = $PSBoundParameters.ContainsKey('StaticDataFile')
+
+if ($PSBoundParameters.ContainsKey('AccountantRoot')) {
+    # AccountantRoot is scalar: CLI always wins when provided.
+    $Config.AccountantRoot = $AccountantRoot
+}
+
+if ($PSBoundParameters.ContainsKey('Clients')) {
+    if ($staticDataFileExplicit -and $resolvedStaticDataFile) {
+        # Explicit config path: merge client entries.
+        $Config.Clients = Merge-Clients -BaseClients $Config.Clients -OverlayClients $Clients
+    } else {
+        # No explicit config path: CLI overrides config.
+        $Config.Clients = $Clients
+    }
+}
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -143,6 +307,20 @@ function Resolve-Clients {
         foreach ($k in $inputVal.Keys) {
             $name = ($k ?? '').ToString().Trim()
             $root = ($inputVal[$k] ?? '').ToString().Trim()
+            if (-not $root) { continue }
+            if (-not $name) { $name = Get-AliasFromPath -Path $root }
+            if (-not $name) { continue }
+            $results += [pscustomobject]@{ Name = $name; Root = $root }
+        }
+        return $results | Sort-Object Name
+    }
+
+    # JSON object (ConvertFrom-Json) becomes PSCustomObject with properties
+    # e.g. { "ClientA": "C:\\path", "ClientB": "gdrive:..." }
+    if ($inputVal -is [pscustomobject]) {
+        foreach ($p in $inputVal.PSObject.Properties) {
+            $name = ($p.Name ?? '').ToString().Trim()
+            $root = ($p.Value ?? '').ToString().Trim()
             if (-not $root) { continue }
             if (-not $name) { $name = Get-AliasFromPath -Path $root }
             if (-not $name) { continue }
@@ -428,7 +606,16 @@ function Show-Settings {
     }
 
     Write-Host ''
-    Write-Info 'Edit the config block near the top of this script to change defaults.'
+    if ($resolvedStaticDataFile) {
+        Write-Info "Static data file: $resolvedStaticDataFile"
+    } else {
+        if ($defaultStaticDataFile) {
+            Write-Info "Static data file: (none loaded) - create $defaultStaticDataFile or pass -StaticDataFile"
+        } else {
+            Write-Info "Static data file: (none loaded) - set LOCALAPPDATA or pass -StaticDataFile"
+        }
+    }
+    Write-Info 'CLI parameters override by default; when -StaticDataFile is provided, Clients are merged.'
     Write-Host ''
     Read-Host 'Press Enter to go back'
 }

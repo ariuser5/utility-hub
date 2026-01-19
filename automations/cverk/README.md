@@ -48,19 +48,30 @@ Use [App-Cverk.ps1](automations/cverk/App-Cverk.ps1) as the interactive entrypoi
 
 Examples:
 
-- Default (uses the config block inside the script):
+- Default (loads static data from `%LOCALAPPDATA%\utility-hub\data\contacts-data.json` if it exists):
 	- `./App-Cverk.ps1`
 
 - Provide roots directly:
-	- `./App-Cverk.ps1 -AccountantRoot "C:\\CVERK\\accountant" -Clients @("ClientA=C:\\CVERK\\clients\\ClientA", "gdrive:Documents/work/cverk/clienti/ClientB")`
+	- `./App-Cverk.ps1 -AccountantRoot "C:\\accountant" -Clients @("ClientA=C:\\clients\\ClientA", "gdrive:Documents/work/clienti/ClientB")`
 
 - Provide clients as a hashtable:
-	- `./App-Cverk.ps1 -Clients @{ ClientA = "C:\\CVERK\\clients\\ClientA"; ClientB = "gdrive:Documents/work/cverk/clienti/ClientB" }`
+	- `./App-Cverk.ps1 -Clients @{ ClientA = "C:\\clients\\ClientA"; ClientB = "gdrive:Documents/work/clienti/ClientB" }`
 
 Configure roots:
 
-- Edit `AccountantRoot` and `Clients` in the config block inside the script.
+- Create `%LOCALAPPDATA%\utility-hub\data\contacts-data.json` (see `contacts-data.example.json`).
+- Or pass `-StaticDataFile` to load config from elsewhere.
 - Or pass `-AccountantRoot` / `-Clients` on the command line.
+
+Precedence:
+
+- If `-StaticDataFile` is not provided: `-AccountantRoot` / `-Clients` override file values.
+- If `-StaticDataFile` is provided: values are merged; for `Clients`, entries are combined and CLI wins on duplicate aliases.
+
+Config file schema (`contacts-data.json`):
+
+- `AccountantRoot`: string
+- `Clients`: either a hashtable/object (`{ "ClientA": "C:\\..." }`) or an array of strings (`["ClientA=C:\\...", "gdrive:..."]`)
 
 Notes:
 
