@@ -91,6 +91,10 @@ function Assert-Interactive {
     }
 }
 
+function Request-Quit {
+    $script:__ShouldQuit = $true
+}
+
 function Get-AliasFromPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -240,7 +244,8 @@ function Select-FromList {
     param(
         [Parameter(Mandatory = $true)][string]$Title,
         [Parameter(Mandatory = $true)][object[]]$Items,
-        [Parameter()][string]$ItemLabel = 'item'
+        [Parameter()][string]$ItemLabel = 'item',
+        [Parameter()][switch]$AllowQuit
     )
 
     Write-Heading $Title
@@ -258,7 +263,11 @@ function Select-FromList {
     }
 
     Write-Host ''
-    Write-Info "Type a number, or 'b' to go back."
+    if ($AllowQuit) {
+        Write-Info "Type a number, 'b' to go back, or 'q' to quit."
+    } else {
+        Write-Info "Type a number, or 'b' to go back."
+    }
 
     while ($true) {
         $raw = Read-Host 'Select'
@@ -266,6 +275,11 @@ function Select-FromList {
         $raw = $raw.Trim()
 
         if ($raw.Equals('b', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $null
+        }
+
+        if ($AllowQuit -and $raw.Equals('q', [System.StringComparison]::OrdinalIgnoreCase)) {
+            Request-Quit
             return $null
         }
 
@@ -289,7 +303,7 @@ function Browse-Clients {
         Write-Info "Count: $($clients.Count)"
         Write-Host ''
 
-        $client = Select-FromList -Title 'Select client' -Items $clients -ItemLabel 'clients'
+        $client = Select-FromList -Title 'Select client' -Items $clients -ItemLabel 'clients' -AllowQuit
         if (-not $client) { return }
 
         Start-Preview -Root $client.Root -Title "Client preview: $($client.Name)"
@@ -356,7 +370,7 @@ function Pipelines-Menu {
         Write-Host ''
 
         $pipelines = Get-PipelineScripts
-        $p = Select-FromList -Title 'Select pipeline' -Items $pipelines -ItemLabel 'pipelines'
+        $p = Select-FromList -Title 'Select pipeline' -Items $pipelines -ItemLabel 'pipelines' -AllowQuit
         if (-not $p) { return }
 
         while ($true) {
@@ -414,6 +428,7 @@ function Show-Settings {
 Assert-Interactive
 
 while ($true) {
+    if ($script:__ShouldQuit) { break }
     Clear-Host
 
     Write-Heading 'CVERK automation entrypoint'
