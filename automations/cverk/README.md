@@ -42,6 +42,43 @@ Examples (PowerShell):
 - `pipelines/`: end-to-end flows for CVERK processing and distribution.
 - `scripts/`: focused helpers that pipelines can compose.
 
+## Entrypoint
+
+Use [App-Cverk.ps1](automations/cverk/App-Cverk.ps1) as the interactive entrypoint for browsing client/accountant folders (read-only) and jumping into pipelines.
+
+Examples:
+
+- Default (uses the config block inside the script):
+	- `./App-Cverk.ps1`
+
+- Provide roots directly:
+	- `./App-Cverk.ps1 -AccountantRoot "C:\\CVERK\\accountant" -Clients @("ClientA=C:\\CVERK\\clients\\ClientA", "gdrive:Documents/work/cverk/clienti/ClientB")`
+
+- Provide clients as a hashtable:
+	- `./App-Cverk.ps1 -Clients @{ ClientA = "C:\\CVERK\\clients\\ClientA"; ClientB = "gdrive:Documents/work/cverk/clienti/ClientB" }`
+
+Configure roots:
+
+- Edit `AccountantRoot` and `Clients` in the config block inside the script.
+- Or pass `-AccountantRoot` / `-Clients` on the command line.
+
+Notes:
+
+- Each client entry can be `Alias=Path` or just `Path`.
+- If no alias is provided, the alias is derived from the last path segment.
+- `Path` can be a filesystem path or an rclone remote spec like `gdrive:clients/foo`.
+
+Navigation preview commands:
+
+Navigation preview controls (in the preview window):
+
+- Up/Down: move selection
+- Right/Enter: enter selected folder (or `../`)
+- Left/Backspace: go up
+- `q` or Esc: quit preview
+
+Implementation: the preview UI is shared and lives in [automations/utils/Preview.ps1](automations/utils/Preview.ps1).
+
 ## Scripts
 
 ### Archive-GDriveFolderByLabel.ps1
