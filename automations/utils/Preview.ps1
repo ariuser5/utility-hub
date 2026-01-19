@@ -367,7 +367,7 @@ function Render-SelectorScreen {
         [Parameter(Mandatory = $true)][string]$TitleText,
         [Parameter(Mandatory = $true)][string]$BackendLabel,
         [Parameter(Mandatory = $true)][string]$LocationText,
-        [Parameter(Mandatory = $true)][object[]]$Entries,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Entries,
         [Parameter(Mandatory = $true)][int]$SelectedIndex,
         [Parameter(Mandatory = $true)][int]$ScrollOffset,
         [Parameter()][int]$MaxDepth,
@@ -472,14 +472,14 @@ function Render-LoadingScreen {
 
 function Convert-RcloneLsfLinesToEntries {
     param(
-        [Parameter(Mandatory = $true)][string[]]$Lines,
+        [Parameter()][string[]]$Lines = @(),
         [Parameter()][bool]$IncludeParent = $false
     )
 
     $dirs = @()
     $files = @()
 
-    foreach ($line in $Lines) {
+    foreach ($line in ($Lines ?? @())) {
         if ($null -eq $line) { continue }
         $s = $line.ToString().Trim()
         if (-not $s) { continue }
