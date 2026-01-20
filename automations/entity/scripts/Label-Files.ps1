@@ -730,19 +730,33 @@ if ($AutoLabel) {
 
         $desired = "[$AutoLabel] $basename"
         $targetBasename = Get-UniqueBasename -DesiredBasename $desired -ExistingNames $existingNames
-        $targetRemote = "$remoteFolder/$targetBasename"
 
         try {
-            if ($PSCmdlet.ShouldProcess($remoteItem, "Rename to $targetRemote")) {
-                Write-Host "Renaming: $basename -> $targetBasename" -ForegroundColor Yellow
-                & rclone moveto $remoteItem $targetRemote
-                if ($LASTEXITCODE -ne 0) {
-                    throw "rclone moveto failed (exit $LASTEXITCODE)"
-                }
+            if ($baseInfo.PathType -eq 'Remote') {
+                $remoteItem = "$remoteFolder/$($it.RemoteRelPath)"
+                $targetRemote = "$remoteFolder/$targetBasename"
+                
+                if ($PSCmdlet.ShouldProcess($remoteItem, "Rename to $targetRemote")) {
+                    Write-Host "Renaming: $basename -> $targetBasename" -ForegroundColor Yellow
+                    & rclone moveto $remoteItem $targetRemote
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "rclone moveto failed (exit $LASTEXITCODE)"
+                    }
 
-                [void]$existingNames.Remove($basename)
-                [void]$existingNames.Add($targetBasename)
-                $renamed++
+                    [void]$existingNames.Remove($basename)
+                    [void]$existingNames.Add($targetBasename)
+                    $renamed++
+                }
+            } else {
+                $src = $it.LocalFileInfo.FullName
+                
+                if ($PSCmdlet.ShouldProcess($src, "Rename to $targetBasename")) {
+                    Write-Host "Renaming: $basename -> $targetBasename" -ForegroundColor Yellow
+                    Rename-Item -LiteralPath $src -NewName $targetBasename -ErrorAction Stop
+                    [void]$existingNames.Remove($basename)
+                    [void]$existingNames.Add($targetBasename)
+                    $renamed++
+                }
             }
         } catch {
             $failed++
@@ -866,22 +880,35 @@ foreach ($op in $ops) {
             throw "Label '$lbl' in todo is not in configured labels: $($resolvedLabels -join ', ')"
         }
 
-        $remoteItem = "$remoteFolder/$($itemByBasename[$basename].RemoteRelPath)"
         $desired = "[$lbl] $basename"
         $targetBasename = Get-UniqueBasename -DesiredBasename $desired -ExistingNames $existingNames
-        $targetRemote = "$remoteFolder/$targetBasename"
 
         try {
-            if ($PSCmdlet.ShouldProcess($remoteItem, "Rename to $targetRemote")) {
-                Write-Host "Renaming: $basename -> $targetBasename" -ForegroundColor Yellow
-                & rclone moveto $remoteItem $targetRemote
-                if ($LASTEXITCODE -ne 0) {
-                    throw "rclone moveto failed (exit $LASTEXITCODE)"
-                }
+            if ($baseInfo.PathType -eq 'Remote') {
+                $remoteItem = "$remoteFolder/$($itemByBasename[$basename].RemoteRelPath)"
+                $targetRemote = "$remoteFolder/$targetBasename"
+                
+                if ($PSCmdlet.ShouldProcess($remoteItem, "Rename to $targetRemote")) {
+                    Write-Host "Renaming: $basename -> $targetBasename" -ForegroundColor Yellow
+                    & rclone moveto $remoteItem $targetRemote
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "rclone moveto failed (exit $LASTEXITCODE)"
+                    }
 
-                [void]$existingNames.Remove($basename)
-                [void]$existingNames.Add($targetBasename)
-                $renamed++
+                    [void]$existingNames.Remove($basename)
+                    [void]$existingNames.Add($targetBasename)
+                    $renamed++
+                }
+            } else {
+                $src = $itemByBasename[$basename].LocalFileInfo.FullName
+                
+                if ($PSCmdlet.ShouldProcess($src, "Rename to $targetBasename")) {
+                    Write-Host "Renaming: $basename -> $targetBasename" -ForegroundColor Yellow
+                    Rename-Item -LiteralPath $src -NewName $targetBasename -ErrorAction Stop
+                    [void]$existingNames.Remove($basename)
+                    [void]$existingNames.Add($targetBasename)
+                    $renamed++
+                }
             }
         } catch {
             $failed++
