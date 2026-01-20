@@ -51,9 +51,8 @@ $ErrorActionPreference = 'Stop'
 # Helpers
 # -----------------------------------------------------------------------------
 
-$entityConfigScript = Join-Path $PSScriptRoot '.\helpers\EntityConfig.ps1'
-$entityConfigScript = (Resolve-Path -LiteralPath $entityConfigScript -ErrorAction Stop).Path
-. $entityConfigScript
+$entityConfigModule = Join-Path $PSScriptRoot '.\helpers\EntityConfig.psm1'
+Import-Module $entityConfigModule -Force
 
 $init = Initialize-EntityConfig -StaticDataFile $StaticDataFile -AccountantRoot $AccountantRoot -Clients $Clients -BoundParameters $PSBoundParameters
 $Config = $init.Config

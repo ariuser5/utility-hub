@@ -1,6 +1,6 @@
 <#
 -------------------------------------------------------------------------------
-Editor.ps1
+Editor.psm1
 -------------------------------------------------------------------------------
 Shared editor launch + wait helpers (git-rebase-like flows).
 
@@ -17,6 +17,9 @@ Notes:
   - For GUI editors, a small wait loop supports:
       - 'c' continue now (keep editor open)
       - 'q' abort
+
+Exported functions:
+  - Invoke-UtilityHubEditor
 -------------------------------------------------------------------------------
 #>
 
@@ -199,3 +202,5 @@ function Invoke-UtilityHubEditor {
         Start-Sleep -Milliseconds 200
     }
 }
+
+Export-ModuleMember -Function Invoke-UtilityHubEditor

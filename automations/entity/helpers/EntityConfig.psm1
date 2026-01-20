@@ -1,6 +1,6 @@
 <#
 -------------------------------------------------------------------------------
-EntityConfig.ps1
+EntityConfig.psm1
 -------------------------------------------------------------------------------
 Shared static-data/config helpers for entity automations.
 
@@ -10,7 +10,9 @@ Responsibilities:
   - Apply CLI override/merge rules
   - Normalize and resolve client entries (aliases + roots)
 
-Designed to be dot-sourced by interactive entrypoints like App-Main.ps1.
+Exported functions:
+  - Initialize-EntityConfig
+  - Resolve-Clients
 -------------------------------------------------------------------------------
 #>
 
@@ -332,3 +334,5 @@ function Initialize-EntityConfig {
         ResolvedStaticDataFile = $resolvedStaticDataFilePath
     }
 }
+
+Export-ModuleMember -Function Initialize-EntityConfig, Resolve-Clients

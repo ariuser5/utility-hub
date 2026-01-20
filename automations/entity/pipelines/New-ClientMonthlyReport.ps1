@@ -137,9 +137,8 @@ $resetCount = 0
 # Write initial temp file.
 Set-Content -LiteralPath $tmpEdit -Value (New-MonthlyReportParamsPsd1Text -Values $seed) -Encoding UTF8
 
-$editorScript = Join-Path $PSScriptRoot '..\helpers\Editor.ps1'
-$editorScript = (Resolve-Path -LiteralPath $editorScript -ErrorAction Stop).Path
-. $editorScript
+$editorModule = Join-Path $PSScriptRoot '..\helpers\Editor.psm1'
+Import-Module $editorModule -Force
 
 while ($true) {
     if (-not $NoEdit) {
