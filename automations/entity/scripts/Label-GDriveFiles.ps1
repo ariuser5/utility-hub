@@ -25,13 +25,21 @@ Examples:
 -------------------------------------------------------------------------------
 #>
 
-[CmdletBinding(SupportsShouldProcess = $true, DefaultParameterSetName = 'Labels')]
+[CmdletBinding(SupportsShouldProcess = $true, DefaultParameterSetName = 'Unified')]
 param(
-    [Parameter()]
+    # Base folder path (local folder or rclone remote spec, e.g. "gdrive:clients/acme/inbox").
+    [Parameter(Mandatory = $true, ParameterSetName = 'Unified')]
+    [string]$Path,
+
+    [Parameter(ParameterSetName = 'Unified')]
+    [ValidateSet('Auto', 'Local', 'Remote')]
+    [string]$PathType = 'Auto',
+
+    [Parameter(ParameterSetName = 'LegacyRemote')]
     [string]$RemoteName = "gdrive",
 
     # Remote folder path on Google Drive (no trailing slash needed)
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
     [string]$FolderPath,
 
     # If provided, files with basenames matching this regex are excluded from processing entirely
@@ -55,11 +63,6 @@ $ErrorActionPreference = "Stop"
 
 # Centralized label validation (used for configured labels + AutoLabel + interactive custom label entry)
 $LabelValidationPattern = '^[a-zA-Z0-9_-]+$'
-
-if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
-    Write-Error "rclone not found on PATH. Install it (e.g., 'winget install Rclone.Rclone') and ensure it's available in your session."
-    exit 1
-}
 
 function Resolve-Labels {
     param(
@@ -729,8 +732,141 @@ if ($ExcludeNameRegex) {
     $excludeRegexObj = [regex]$ExcludeNameRegex
 }
 
-$normalizedFolderPath = ($FolderPath -replace '\\','/').Trim().Trim('/').TrimEnd('/')
-$remoteFolder = ("${RemoteName}:${normalizedFolderPath}").TrimEnd('/')
+$pathModule = Join-Path $PSScriptRoot '..\helpers\Path.psm1'
+Import-Module $pathModule -Force
+
+$baseInfo = $null
+try {
+    if ($PSCmdlet.ParameterSetName -eq 'LegacyRemote') {
+        $normalizedFolderPath = ($FolderPath -replace '\\','/').Trim().Trim('/').TrimEnd('/')
+        $baseInfo = Resolve-UtilityHubPath -Path ("{0}:{1}" -f $RemoteName, $normalizedFolderPath) -PathType 'Remote'
+    } else {
+        $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
+    }
+} catch {
+    Write-Error $_.Exception.Message
+    exit 1
+}
+
+if ($baseInfo.PathType -eq 'Local') {
+    if (-not (Test-Path -LiteralPath $baseInfo.LocalPath -PathType Container)) {
+        Write-Error "Folder does not exist: $($baseInfo.LocalPath)"
+        exit 1
+    }
+
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "Local Labeling" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "Folder: $($baseInfo.LocalPath)" -ForegroundColor Gray
+    Write-Host "Labels: $($resolvedLabels -join ', ')" -ForegroundColor Gray
+    if ($allowedLabelsRegex) { Write-Host "Already-labeled pattern: $($allowedLabelsRegex.ToString())" -ForegroundColor DarkGray }
+    if ($ExcludeNameRegex) { Write-Host "ExcludeNameRegex: $ExcludeNameRegex" -ForegroundColor Gray }
+    Write-Host ""
+
+    function Get-LocalRenameTarget {
+        param(
+            [Parameter(Mandatory = $true)][string]$Folder,
+            [Parameter(Mandatory = $true)][string]$Label,
+            [Parameter(Mandatory = $true)][string]$OriginalName
+        )
+
+        $baseNew = "[{0}] {1}" -f $Label, $OriginalName
+        $candidate = $baseNew
+        $i = 2
+        while (Test-Path -LiteralPath (Join-Path $Folder $candidate) -PathType Leaf) {
+            $ext = [System.IO.Path]::GetExtension($baseNew)
+            $stem = [System.IO.Path]::GetFileNameWithoutExtension($baseNew)
+            if ($ext) {
+                $candidate = "{0} ({1}){2}" -f $stem, $i, $ext
+            } else {
+                $candidate = "{0} ({1})" -f $stem, $i
+            }
+            $i++
+            if ($i -gt 1000) { throw "Too many name collisions for '$OriginalName'" }
+        }
+
+        return $candidate
+    }
+
+    $all = Get-ChildItem -LiteralPath $baseInfo.LocalPath -File
+    if ($excludeRegexObj) {
+        $all = $all | Where-Object { -not $excludeRegexObj.IsMatch($_.Name) }
+    }
+
+    if (-not $all -or $all.Count -eq 0) {
+        Write-Host "No files to review (all excluded or none found)." -ForegroundColor Green
+        exit 0
+    }
+
+    $processed = 0
+    $renamed = 0
+    $alreadyLabeledSkipped = 0
+    $skipped = 0
+    $failed = 0
+
+    foreach ($fi in $all) {
+        $processed++
+        $basename = $fi.Name
+
+        $isAlready = ($allowedLabelsRegex -and $allowedLabelsRegex.IsMatch($basename)) -or (-not $allowedLabelsRegex -and $anyBracketLabelRegex.IsMatch($basename))
+        if ($isAlready) {
+            $alreadyLabeledSkipped++
+            continue
+        }
+
+        $chosen = $null
+        if ($AutoLabel) {
+            $chosen = $AutoLabel.Trim().Trim('[', ']')
+        } else {
+            Write-Host "File: $basename" -ForegroundColor Cyan
+            for ($i = 0; $i -lt $resolvedLabels.Count; $i++) {
+                Write-Host ("  {0}) {1}" -f ($i + 1), $resolvedLabels[$i]) -ForegroundColor Gray
+            }
+            $ans = Read-Host "Pick label number (Enter=skip)"
+            if (-not $ans) {
+                $skipped++
+                continue
+            }
+            $idx = 0
+            if (-not [int]::TryParse($ans, [ref]$idx) -or $idx -lt 1 -or $idx -gt $resolvedLabels.Count) {
+                Write-Host "Invalid selection; skipping." -ForegroundColor DarkYellow
+                $skipped++
+                continue
+            }
+            $chosen = $resolvedLabels[$idx - 1]
+        }
+
+        try {
+            $targetName = Get-LocalRenameTarget -Folder $baseInfo.LocalPath -Label $chosen -OriginalName $basename
+            $src = $fi.FullName
+            $dst = Join-Path $baseInfo.LocalPath $targetName
+
+            if ($PSCmdlet.ShouldProcess($src, "Rename to $targetName")) {
+                Rename-Item -LiteralPath $src -NewName $targetName
+                $renamed++
+            }
+        } catch {
+            Write-Error "Rename failed: $basename. $_"
+            $failed++
+        }
+    }
+
+    Write-Host "" 
+    Write-Host "Processed:       $processed" -ForegroundColor Gray
+    Write-Host "Renamed:         $renamed" -ForegroundColor Gray
+    Write-Host "Already labeled: $alreadyLabeledSkipped" -ForegroundColor Gray
+    Write-Host "Skipped:         $skipped" -ForegroundColor Gray
+    Write-Host "Failed:          $failed" -ForegroundColor Gray
+
+    exit (if ($failed -gt 0) { 2 } else { 0 })
+}
+
+if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
+    Write-Error "rclone not found on PATH. Install it (e.g., 'winget install Rclone.Rclone') and ensure it's available in your session."
+    exit 1
+}
+
+$remoteFolder = $baseInfo.Normalized.TrimEnd('/')
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "GDrive Labeling" -ForegroundColor Cyan

@@ -23,13 +23,21 @@ Examples:
 -------------------------------------------------------------------------------
 #>
 
-[CmdletBinding(SupportsShouldProcess = $true)]
+[CmdletBinding(SupportsShouldProcess = $true, DefaultParameterSetName = 'Unified')]
 param(
-    [Parameter()]
+    # Base folder path (local folder or rclone remote spec, e.g. "gdrive:clients/acme/inbox")
+    [Parameter(Mandatory = $true, ParameterSetName = 'Unified')]
+    [string]$Path,
+
+    [Parameter(ParameterSetName = 'Unified')]
+    [ValidateSet('Auto', 'Local', 'Remote')]
+    [string]$PathType = 'Auto',
+
+    [Parameter(ParameterSetName = 'LegacyRemote')]
     [string]$RemoteName = "gdrive",
 
     # Remote folder path on Google Drive (no trailing slash needed)
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
     [string]$FolderPath,
 
     # Destination folder path on Google Drive to upload archives to.
@@ -63,9 +71,27 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
-    Write-Error "rclone not found on PATH. Install it (e.g., 'winget install Rclone.Rclone') and ensure it's available in your session."
+$pathModule = Join-Path $PSScriptRoot '..\helpers\Path.psm1'
+Import-Module $pathModule -Force
+
+$baseInfo = $null
+try {
+    if ($PSCmdlet.ParameterSetName -eq 'LegacyRemote') {
+        $normalizedFolderPath = ($FolderPath -replace '\\','/').Trim().Trim('/').TrimEnd('/')
+        $baseInfo = Resolve-UtilityHubPath -Path ("{0}:{1}" -f $RemoteName, $normalizedFolderPath) -PathType 'Remote'
+    } else {
+        $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
+    }
+} catch {
+    Write-Error $_.Exception.Message
     exit 1
+}
+
+if ($baseInfo.PathType -eq 'Remote') {
+    if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
+        Write-Error "rclone not found on PATH. Install it (e.g., 'winget install Rclone.Rclone') and ensure it's available in your session."
+        exit 1
+    }
 }
 
 function Get-LabelFromBasename {
@@ -97,17 +123,38 @@ function Get-LabelFileSelector {
 }
 
 if (-not $ArchiveDestinationPath -or -not $ArchiveDestinationPath.Trim()) {
-    $ArchiveDestinationPath = "$FolderPath/archives"
+    $ArchiveDestinationPath = Join-UtilityHubPath -Base $baseInfo.Normalized -Child 'archives' -PathType $baseInfo.PathType
 }
 
 $archiveExt = Convert-ArchiveExtension -Ext $ArchiveExtension
 
-$remoteFolder = "${RemoteName}:${FolderPath}"
+$remoteFolder = $null
+$uploadRemoteName = $null
+$uploadRemotePath = $null
+
+if ($baseInfo.PathType -eq 'Remote') {
+    $remoteFolder = $baseInfo.Normalized
+
+    # Destination may be a full remote spec or a remote-path-only. Parse it.
+    $destInfo = $null
+    if ($ArchiveDestinationPath -match '^[^\\/]+:.+$' -or $ArchiveDestinationPath -match '^[^\\/]+:$') {
+        $destInfo = Resolve-UtilityHubPath -Path $ArchiveDestinationPath -PathType 'Remote'
+    } else {
+        $destInfo = Resolve-UtilityHubPath -Path ("{0}:{1}" -f $baseInfo.RemoteName, $ArchiveDestinationPath) -PathType 'Remote'
+    }
+
+    $uploadRemoteName = $destInfo.RemoteName
+    $uploadRemotePath = $destInfo.RemotePath
+}
 
 Write-Host "Starting label archive process..." -ForegroundColor Cyan
-Write-Host "  Remote folder: $remoteFolder" -ForegroundColor Gray
+Write-Host "  Folder: $($baseInfo.Normalized)" -ForegroundColor Gray
 Write-Host "  Archive format: $archiveExt" -ForegroundColor Gray
-Write-Host "  Upload to: ${RemoteName}:$ArchiveDestinationPath" -ForegroundColor Gray
+if ($baseInfo.PathType -eq 'Remote') {
+    Write-Host "  Upload to: ${uploadRemoteName}:$uploadRemotePath" -ForegroundColor Gray
+} else {
+    Write-Host "  Copy to: $ArchiveDestinationPath" -ForegroundColor Gray
+}
 
 if ($ExcludeNameRegex) {
     Write-Host "  Excluding basenames matching: $ExcludeNameRegex" -ForegroundColor Gray
@@ -126,7 +173,18 @@ if (-not (Test-Path -LiteralPath $uploadScript -PathType Leaf)) {
 }
 
 Write-Host "`nListing files..." -ForegroundColor Yellow
-$basenames = rclone lsf "$remoteFolder" --files-only
+
+$basenames = $null
+if ($baseInfo.PathType -eq 'Remote') {
+    $basenames = rclone lsf "$remoteFolder" --files-only
+} else {
+    try {
+        $basenames = Get-ChildItem -LiteralPath $baseInfo.LocalPath -File | Select-Object -ExpandProperty Name
+    } catch {
+        Write-Error "Failed to list files in '$($baseInfo.LocalPath)'."
+        exit 1
+    }
+}
 
 if (-not $basenames) {
     Write-Warning "No files found in '$remoteFolder'"
@@ -178,6 +236,82 @@ $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $workRoot = Join-Path $env:TEMP ("utility-hub_label-archive_" + [System.Guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $workRoot | Out-Null
 
+function Test-ExecutableAvailable {
+    param([Parameter(Mandatory = $true)][string]$Exe)
+
+    if (-not $Exe) { return $false }
+
+    if ($Exe -match '^[a-zA-Z]:\\' -or $Exe.Contains('\\') -or $Exe.Contains('/')) {
+        return (Test-Path -LiteralPath $Exe -PathType Leaf)
+    }
+
+    return ($null -ne (Get-Command $Exe -ErrorAction SilentlyContinue))
+}
+
+function New-ArchiveFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$ArchivePath,
+        [Parameter(Mandatory = $true)][string]$InputDir,
+        [Parameter(Mandatory = $true)][string]$ArchiveExt,
+        [Parameter(Mandatory = $true)][string]$SevenZipExe
+    )
+
+    if (-not (Test-Path -LiteralPath $InputDir -PathType Container)) {
+        throw "Input directory not found: $InputDir"
+    }
+
+    if (Test-Path -LiteralPath $ArchivePath) {
+        Remove-Item -LiteralPath $ArchivePath -Force
+    }
+
+    switch ($ArchiveExt) {
+        'zip' {
+            Compress-Archive -Path (Join-Path $InputDir '*') -DestinationPath $ArchivePath -CompressionLevel Optimal
+            return
+        }
+        '7z' {
+            if (-not (Test-ExecutableAvailable -Exe $SevenZipExe)) {
+                throw "7-Zip executable not found: '$SevenZipExe'. Install 7-Zip or pass -SevenZipExe with a valid path."
+            }
+            Push-Location $InputDir
+            try {
+                & $SevenZipExe a -t7z $ArchivePath . | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "7z failed with exit code $LASTEXITCODE" }
+            } finally {
+                Pop-Location
+            }
+            return
+        }
+        'tar' {
+            if (-not (Test-ExecutableAvailable -Exe 'tar')) {
+                throw "'tar' not found on PATH. Install tar (Windows ships bsdtar) or add it to PATH."
+            }
+            & tar -cf $ArchivePath -C $InputDir .
+            if ($LASTEXITCODE -ne 0) { throw "tar failed with exit code $LASTEXITCODE" }
+            return
+        }
+        'tar.gz' {
+            if (-not (Test-ExecutableAvailable -Exe 'tar')) {
+                throw "'tar' not found on PATH. Install tar (Windows ships bsdtar) or add it to PATH."
+            }
+            & tar -czf $ArchivePath -C $InputDir .
+            if ($LASTEXITCODE -ne 0) { throw "tar failed with exit code $LASTEXITCODE" }
+            return
+        }
+        'tgz' {
+            if (-not (Test-ExecutableAvailable -Exe 'tar')) {
+                throw "'tar' not found on PATH. Install tar (Windows ships bsdtar) or add it to PATH."
+            }
+            & tar -czf $ArchivePath -C $InputDir .
+            if ($LASTEXITCODE -ne 0) { throw "tar failed with exit code $LASTEXITCODE" }
+            return
+        }
+        default {
+            throw "Unsupported archive extension '$ArchiveExt'. Supported: zip, 7z, tar, tar.gz, tgz"
+        }
+    }
+}
+
 try {
     foreach ($g in $groups) {
         $label = $g.Name
@@ -186,7 +320,8 @@ try {
         $archiveFileName = "${labelDirSafe}_${timestamp}.$archiveExt"
         $archivePath = Join-Path $workRoot $archiveFileName
 
-        if ($PSCmdlet.ShouldProcess("${RemoteName}:$ArchiveDestinationPath", "Create + upload archive for label '$label'")) {
+        if ($baseInfo.PathType -eq 'Remote') {
+            if ($PSCmdlet.ShouldProcess("${uploadRemoteName}:$uploadRemotePath", "Create + upload archive for label '$label'")) {
             Write-Host "`n[$label] Creating archive..." -ForegroundColor Yellow
 
             $include = $null
@@ -205,18 +340,50 @@ try {
 
             # Reuse generic archiver to produce the archive locally
             if ($fileNames) {
-                $created = & $archiveFolderScript -RemoteName $RemoteName -FolderPath $FolderPath -FileNames $fileNames -ArchiveExtension $archiveExt -SevenZipExe $SevenZipExe -OutputPath $archivePath
+                $created = & $archiveFolderScript -RemoteName $baseInfo.RemoteName -FolderPath $baseInfo.RemotePath -FileNames $fileNames -ArchiveExtension $archiveExt -SevenZipExe $SevenZipExe -OutputPath $archivePath
             } else {
-                $created = & $archiveFolderScript -RemoteName $RemoteName -FolderPath $FolderPath -FilePattern $include -ExcludePattern $exclude -ArchiveExtension $archiveExt -SevenZipExe $SevenZipExe -OutputPath $archivePath
+                $created = & $archiveFolderScript -RemoteName $baseInfo.RemoteName -FolderPath $baseInfo.RemotePath -FilePattern $include -ExcludePattern $exclude -ArchiveExtension $archiveExt -SevenZipExe $SevenZipExe -OutputPath $archivePath
             }
             if (-not $created) {
                 throw "Archive creation produced no output path for label '$label'."
             }
 
             Write-Host "[$label] Uploading archive..." -ForegroundColor Yellow
-            & $uploadScript -RemoteName $RemoteName -DestinationPath $ArchiveDestinationPath -LocalFilePath $archivePath -Overwrite:$Overwrite
+            & $uploadScript -RemoteName $uploadRemoteName -DestinationPath $uploadRemotePath -LocalFilePath $archivePath -Overwrite:$Overwrite
 
             Write-Host "[$label] ✓ Done" -ForegroundColor Green
+        }
+        } else {
+            if ($PSCmdlet.ShouldProcess($ArchiveDestinationPath, "Create archive for label '$label'")) {
+                Write-Host "`n[$label] Creating archive..." -ForegroundColor Yellow
+
+                $labelWork = Join-Path $workRoot ("work_" + $labelDirSafe)
+                if (Test-Path -LiteralPath $labelWork) {
+                    Remove-Item -LiteralPath $labelWork -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                New-Item -ItemType Directory -Path $labelWork | Out-Null
+
+                foreach ($fi in $g.Group) {
+                    $srcFile = Join-Path $baseInfo.LocalPath $fi.Basename
+                    if (Test-Path -LiteralPath $srcFile -PathType Leaf) {
+                        Copy-Item -LiteralPath $srcFile -Destination $labelWork -Force
+                    }
+                }
+
+                New-ArchiveFile -ArchivePath $archivePath -InputDir $labelWork -ArchiveExt $archiveExt -SevenZipExe $SevenZipExe
+
+                if (-not (Test-Path -LiteralPath $ArchiveDestinationPath -PathType Container)) {
+                    New-Item -ItemType Directory -Path $ArchiveDestinationPath -Force | Out-Null
+                }
+
+                $destFile = Join-Path $ArchiveDestinationPath $archiveFileName
+                if ((Test-Path -LiteralPath $destFile) -and -not $Overwrite) {
+                    Write-Host "[$label] Destination exists; skipping (no -Overwrite): $destFile" -ForegroundColor DarkYellow
+                } else {
+                    Move-Item -LiteralPath $archivePath -Destination $destFile -Force
+                    Write-Host "[$label] ✓ Done" -ForegroundColor Green
+                }
+            }
         }
     }
 
