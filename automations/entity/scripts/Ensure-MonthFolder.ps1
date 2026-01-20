@@ -2,14 +2,18 @@
 # -----------------------------------------------------------------------------
 # Ensure-MonthFolder.ps1
 # -----------------------------------------------------------------------------
-# Creates the next missing month folder (with prefix) in a Google Drive directory.
+# Creates the next missing month folder (with prefix) in a directory.
+# Supports both local filesystem paths and rclone remote specs.
 #
 # Usage:
-#   .\Ensure-MonthFolder.ps1 -RemoteName "gdrive" -DirectoryPath "path/to/dir" [-StartYear 2025] [-NewFolderPrefix "_"]
+#   .\Ensure-MonthFolder.ps1 -Path "gdrive:path/to/dir" [-PathType Auto|Local|Remote] [-StartYear 2025] [-NewFolderPrefix "_"]
+#   .\Ensure-MonthFolder.ps1 -RemoteName "gdrive" -DirectoryPath "path/to/dir" [-StartYear 2025] [-NewFolderPrefix "_"]  # legacy
 #
 # Parameters:
-#   -RemoteName        Name of rclone remote (default: "gdrive")
-#   -DirectoryPath     Path on remote where month folders live (required)
+#   -Path              Base folder where month folders live (local path or rclone remote spec)
+#   -PathType          Auto|Local|Remote (default: Auto)
+#   -RemoteName        Name of rclone remote (legacy)
+#   -DirectoryPath     Path on remote where month folders live (legacy)
 #   -StartYear         Year to start searching for missing months (default: current year)
 #   -NewFolderPrefix   Prefix for new folders (default: "_")
 #
@@ -18,14 +22,24 @@
 #   - Finds the latest existing month for each year, starting from StartYear
 #   - If all months exist for a year, continues to the next year
 #   - Creates the next missing month folder with the specified prefix
-#   - Outputs CREATED:<full-path> if a folder is created, or NOOP if all months exist
+#   - Outputs CREATED:<path> if a folder is created, or NOOP if all months exist
 # -----------------------------------------------------------------------------
+[
+    CmdletBinding(DefaultParameterSetName = 'Unified')
+]
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true, ParameterSetName = 'Unified')]
+    [string]$Path,
+
+    [Parameter(ParameterSetName = 'Unified')]
+    [ValidateSet('Auto', 'Local', 'Remote')]
+    [string]$PathType = 'Auto',
+
+    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
     [string]$RemoteName = "gdrive",
 
-    # Remote directory path on Google Drive where month folders live
-    [Parameter(Mandatory=$true)]
+    # Remote directory path on Google Drive where month folders live (legacy)
+    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
     [string]$DirectoryPath,
 
     # Start year to check (default: current year)
@@ -41,20 +55,42 @@ $ErrorActionPreference = "Stop"
 # Month short names mapping in order (jan..dec)
 $months = @("jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec")
 
+$pathModule = Join-Path $PSScriptRoot '..\helpers\Path.psm1'
+Import-Module $pathModule -Force
+
+$baseInfo = $null
+if ($PSCmdlet.ParameterSetName -eq 'LegacyRemote') {
+    $DirectoryPath = ($DirectoryPath ?? '').Replace('\\', '/').Trim('/')
+    $baseInfo = Resolve-UtilityHubPath -Path ("{0}:{1}" -f $RemoteName, $DirectoryPath) -PathType 'Remote'
+} else {
+    $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
+}
+
 function Get-LatestMonth {
     param(
         [int]$Year
     )
-    $remoteBase = "${RemoteName}:${DirectoryPath}"
-    try {
-        $existingDirs = rclone lsf "$remoteBase" --dirs-only
-    } catch {
-        Write-Error "Failed to list remote directory '$remoteBase'. Ensure rclone is configured and the path exists."
-        exit 1
+
+    $existingDirs = @()
+    if ($baseInfo.PathType -eq 'Remote') {
+        try {
+            $existingDirs = rclone lsf $baseInfo.Normalized --dirs-only
+        } catch {
+            Write-Error "Failed to list remote directory '$($baseInfo.Normalized)'. Ensure rclone is configured and the path exists."
+            exit 1
+        }
+    } else {
+        try {
+            $existingDirs = Get-ChildItem -LiteralPath $baseInfo.LocalPath -Directory -ErrorAction Stop | Select-Object -ExpandProperty Name
+        } catch {
+            Write-Error "Failed to list local directory '$($baseInfo.LocalPath)'. Ensure the path exists."
+            exit 1
+        }
     }
+
     $existingSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($d in $existingDirs) {
-        $name = $d.TrimEnd('/')
+        $name = ($d ?? '').ToString().TrimEnd('/')
         [void]$existingSet.Add($name)
     }
     $latestIdx = -1
@@ -69,24 +105,8 @@ function Get-LatestMonth {
     return $latestIdx
 }
 
-$remoteBase = "${RemoteName}:${DirectoryPath}"
-Write-Host "Scanning Google Drive directory: $remoteBase" -ForegroundColor Cyan
-
-# List existing subfolders
-try {
-    $existingDirs = rclone lsf "$remoteBase" --dirs-only
-} catch {
-    Write-Error "Failed to list remote directory '$remoteBase'. Ensure rclone is configured and the path exists."
-    exit 1
-}
-
-# Normalize to lower for comparison
-$existingSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-foreach ($d in $existingDirs) {
-    # rclone lsf returns names with trailing '/'; trim it
-    $name = $d.TrimEnd('/')
-    [void]$existingSet.Add($name)
-}
+$where = if ($baseInfo.PathType -eq 'Remote') { 'remote' } else { 'local' }
+Write-Host "Scanning $where directory: $($baseInfo.Normalized)" -ForegroundColor Cyan
 
 # Find the next month to create, recursing to next year if needed
 $currentYear = $StartYear
@@ -107,18 +127,23 @@ while ($true) {
     $missing = "$($months[$nextIdx])-$currentYear"
     $newFolderName = "$NewFolderPrefix$missing"
     Write-Host "Creating new folder: $newFolderName" -ForegroundColor Yellow
-    $targetPath = "${RemoteName}:${DirectoryPath}/$newFolderName"
+    $targetPath = Join-UtilityHubPath -Base $baseInfo.Normalized -Child $newFolderName -PathType $baseInfo.PathType
     break
 }
 
-# rclone mkdir will create nested paths as needed
-$targetPath = "$remoteBase/$newFolderName"
-
-# Create folder
-rclone mkdir $targetPath
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to create folder '$newFolderName' at '$remoteBase' (exit code $LASTEXITCODE)."
-    exit 2
+if ($baseInfo.PathType -eq 'Remote') {
+    rclone mkdir $targetPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to create folder '$newFolderName' at '$($baseInfo.Normalized)' (exit code $LASTEXITCODE)."
+        exit 2
+    }
+} else {
+    try {
+        New-Item -ItemType Directory -Path $targetPath -Force | Out-Null
+    } catch {
+        Write-Error "Failed to create folder '$newFolderName' at '$($baseInfo.LocalPath)'."
+        exit 2
+    }
 }
 
 Write-Host "✓ Created folder: $newFolderName" -ForegroundColor Green

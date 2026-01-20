@@ -4,7 +4,7 @@ New-ClientMonthlyReport.ps1 (Curated)
 -------------------------------------------------------------------------------
 Curated automation wrapper that provides a git-rebase-like "edit then resume" flow
 for running the pipeline:
-  automations/entity/pipelines/New-ClientMonthlyReport.ps1
+    automations/entity/scripts/New-ClientMonthlyReport.ps1
 
 It opens a .psd1 params file in your editor, validates it, and then executes the
 pipeline in a separate pwsh process.
@@ -37,15 +37,23 @@ function New-MonthlyReportParamsPsd1Text {
         [hashtable]$Values
     )
 
-    $remoteName = ($Values.RemoteName ?? 'gdrive').ToString()
-    $directoryPath = ($Values.DirectoryPath ?? '').ToString()
+    $path = ($Values.Path ?? '').ToString()
+    if (-not $path) {
+        $legacyRemoteName = ($Values.RemoteName ?? 'gdrive').ToString()
+        $legacyDirectoryPath = ($Values.DirectoryPath ?? '').ToString()
+        if ($legacyDirectoryPath) {
+            $path = ("{0}:{1}" -f $legacyRemoteName, $legacyDirectoryPath)
+        }
+    }
+
+    $pathType = ($Values.PathType ?? 'Auto').ToString()
     $startYear = $Values.StartYear
     if (-not $startYear) { $startYear = (Get-Date).Year }
     $newFolderPrefix = ($Values.NewFolderPrefix ?? '_').ToString()
 
     # .psd1 uses single-quoted strings here; escape embedded single quotes.
-    $remoteName = $remoteName.Replace("'", "''")
-    $directoryPath = $directoryPath.Replace("'", "''")
+    $path = $path.Replace("'", "''")
+    $pathType = $pathType.Replace("'", "''")
     $newFolderPrefix = $newFolderPrefix.Replace("'", "''")
 
     @(
@@ -58,13 +66,13 @@ function New-MonthlyReportParamsPsd1Text {
         "#   - Set _Command = 'reset' to regenerate defaults and reopen",
         "#",
         "# Notes:",
-        "#   - DirectoryPath must be the REMOTE path only (no 'gdrive:' prefix).",
-        "#   - The pipeline constructs RemoteSpec as: <RemoteName>:<DirectoryPath>",
+        "#   - Path can be a local folder (e.g. 'C:\\path\\to\\dir') or an rclone remote spec (e.g. 'gdrive:path/to/dir').",
+        "#   - PathType is usually 'Auto'. Use 'Local' or 'Remote' to force interpretation.",
         "",
         "@{",
         "    _Command       = $null",
-        "    RemoteName     = '$remoteName'",
-        "    DirectoryPath  = '$directoryPath'",
+        "    Path           = '$path'",
+        "    PathType       = '$pathType'",
         "    StartYear      = $startYear",
         "    NewFolderPrefix = '$newFolderPrefix'",
         "}"
@@ -140,6 +148,9 @@ Set-Content -LiteralPath $tmpEdit -Value (New-MonthlyReportParamsPsd1Text -Value
 $editorModule = Join-Path $PSScriptRoot '..\helpers\Editor.psm1'
 Import-Module $editorModule -Force
 
+$pathModule = Join-Path $PSScriptRoot '..\helpers\Path.psm1'
+Import-Module $pathModule -Force
+
 while ($true) {
     if (-not $NoEdit) {
         $editResult = Invoke-UtilityHubEditor -FilePath $tmpEdit
@@ -188,29 +199,28 @@ while ($true) {
         continue
     }
 
-    $remoteName = ($paramsData['RemoteName'] ?? 'gdrive').ToString().Trim()
-    $directoryPath = ($paramsData['DirectoryPath'] ?? '').ToString().Trim()
+    $path = ($paramsData['Path'] ?? '').ToString().Trim()
+    $pathType = ($paramsData['PathType'] ?? 'Auto').ToString().Trim()
+
+    if (-not $path) {
+        $legacyRemoteName = ($paramsData['RemoteName'] ?? 'gdrive').ToString().Trim()
+        $legacyDirectoryPath = ($paramsData['DirectoryPath'] ?? '').ToString().Trim()
+        if ($legacyDirectoryPath) {
+            $path = ("{0}:{1}" -f $legacyRemoteName, $legacyDirectoryPath)
+        }
+    }
+
     $startYearRaw = ($paramsData['StartYear'] ?? (Get-Date).Year)
     $newFolderPrefix = ($paramsData['NewFolderPrefix'] ?? '_').ToString()
 
-    if (-not $remoteName) {
-        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage 'RemoteName is empty.'
+    if (-not $path) {
+        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage 'Path is required.'
         $NoEdit = $false
         continue
     }
 
-    if (-not $directoryPath) {
-        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage 'DirectoryPath is required.'
-        $NoEdit = $false
-        continue
-    }
-
-    # Normalize slashes for rclone.
-    $directoryPath = $directoryPath.Replace('\\', '/').Trim('/')
-
-    # Prevent common mistake: include remote prefix in DirectoryPath.
-    if ($directoryPath -match '^[^:]+:.+$') {
-        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage "DirectoryPath must NOT include a remote prefix (e.g. 'gdrive:'). Put the remote name in RemoteName."
+    if ($pathType -notin @('Auto', 'Local', 'Remote')) {
+        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage "PathType must be one of: Auto, Local, Remote."
         $NoEdit = $false
         continue
     }
@@ -227,31 +237,46 @@ while ($true) {
         continue
     }
 
-    if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
-        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage "rclone not found on PATH. Install rclone and/or restart the shell."
+    $baseInfo = $null
+    try {
+        $baseInfo = Resolve-UtilityHubPath -Path $path -PathType $pathType
+    } catch {
+        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage $_.Exception.Message
         $NoEdit = $false
         continue
     }
 
-    $remoteSpec = "${remoteName}:$directoryPath"
-
-    # Quick sanity check that the remote path is accessible.
-    try {
-        & rclone lsf $remoteSpec --max-depth 1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "rclone lsf failed (exit $LASTEXITCODE)"
+    if ($baseInfo.PathType -eq 'Remote') {
+        if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
+            Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage "rclone not found on PATH. Install rclone and/or restart the shell."
+            $NoEdit = $false
+            continue
         }
-    } catch {
-        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage ("Remote path not accessible: {0}. {1}" -f $remoteSpec, $_.Exception.Message)
-        $NoEdit = $false
-        continue
+
+        # Quick sanity check that the remote path is accessible.
+        try {
+            & rclone lsf $baseInfo.Normalized --max-depth 1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "rclone lsf failed (exit $LASTEXITCODE)"
+            }
+        } catch {
+            Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage ("Remote path not accessible: {0}. {1}" -f $baseInfo.Normalized, $_.Exception.Message)
+            $NoEdit = $false
+            continue
+        }
+    } else {
+        if (-not (Test-Path -LiteralPath $baseInfo.LocalPath -PathType Container)) {
+            Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage ("Local path not accessible: {0}. Ensure the directory exists." -f $baseInfo.LocalPath)
+            $NoEdit = $false
+            continue
+        }
     }
 
     # Persist last good params (separate from contacts static data).
     if (-not $NoSave) {
         $toSave = @{
-            RemoteName      = $remoteName
-            DirectoryPath   = $directoryPath
+            Path            = $baseInfo.Normalized
+            PathType        = $pathType
             StartYear       = $startYear
             NewFolderPrefix = $newFolderPrefix
         }
@@ -263,17 +288,17 @@ while ($true) {
         }
     }
 
-    $pipelineScript = Join-Path $PSScriptRoot '..\pipelines\New-ClientMonthlyReport.ps1'
+    $pipelineScript = Join-Path $PSScriptRoot '..\scripts\New-ClientMonthlyReport.ps1'
     $pipelineScript = (Resolve-Path -LiteralPath $pipelineScript -ErrorAction Stop).Path
 
     Write-Host ''
     Write-Host "Running monthly report automation..." -ForegroundColor Cyan
     Write-Host "  Script: $pipelineScript" -ForegroundColor DarkGray
-    Write-Host "  Remote: $remoteName" -ForegroundColor DarkGray
-    Write-Host "  Path:   $directoryPath" -ForegroundColor DarkGray
+    Write-Host "  Path:   $($baseInfo.Normalized)" -ForegroundColor DarkGray
+    Write-Host "  Type:   $($baseInfo.PathType)" -ForegroundColor DarkGray
     Write-Host ''
 
-    & pwsh -NoProfile -ExecutionPolicy Bypass -File $pipelineScript -RemoteName $remoteName -DirectoryPath $directoryPath -StartYear $startYear -NewFolderPrefix $newFolderPrefix
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $pipelineScript -Path $baseInfo.Normalized -PathType $baseInfo.PathType -StartYear $startYear -NewFolderPrefix $newFolderPrefix
     $exitCode = $LASTEXITCODE
 
     Remove-Item -LiteralPath $tmpEdit -ErrorAction SilentlyContinue
