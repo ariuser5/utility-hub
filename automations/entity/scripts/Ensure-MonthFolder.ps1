@@ -7,13 +7,10 @@
 #
 # Usage:
 #   .\Ensure-MonthFolder.ps1 -Path "gdrive:path/to/dir" [-PathType Auto|Local|Remote] [-StartYear 2025] [-NewFolderPrefix "_"]
-#   .\Ensure-MonthFolder.ps1 -RemoteName "gdrive" -DirectoryPath "path/to/dir" [-StartYear 2025] [-NewFolderPrefix "_"]  # legacy
 #
 # Parameters:
 #   -Path              Base folder where month folders live (local path or rclone remote spec)
 #   -PathType          Auto|Local|Remote (default: Auto)
-#   -RemoteName        Name of rclone remote (legacy)
-#   -DirectoryPath     Path on remote where month folders live (legacy)
 #   -StartYear         Year to start searching for missing months (default: current year)
 #   -NewFolderPrefix   Prefix for new folders (default: "_")
 #
@@ -24,23 +21,14 @@
 #   - Creates the next missing month folder with the specified prefix
 #   - Outputs CREATED:<path> if a folder is created, or NOOP if all months exist
 # -----------------------------------------------------------------------------
-[
-    CmdletBinding(DefaultParameterSetName = 'Unified')
-]
+[CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true, ParameterSetName = 'Unified')]
+    [Parameter(Mandatory = $true)]
     [string]$Path,
 
-    [Parameter(ParameterSetName = 'Unified')]
+    [Parameter()]
     [ValidateSet('Auto', 'Local', 'Remote')]
     [string]$PathType = 'Auto',
-
-    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
-    [string]$RemoteName = "gdrive",
-
-    # Remote directory path on Google Drive where month folders live (legacy)
-    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
-    [string]$DirectoryPath,
 
     # Start year to check (default: current year)
     [int]$StartYear = (Get-Date).Year,
@@ -59,12 +47,7 @@ $pathModule = Join-Path $PSScriptRoot '..\helpers\Path.psm1'
 Import-Module $pathModule -Force
 
 $baseInfo = $null
-if ($PSCmdlet.ParameterSetName -eq 'LegacyRemote') {
-    $DirectoryPath = ($DirectoryPath ?? '').Replace('\\', '/').Trim('/')
-    $baseInfo = Resolve-UtilityHubPath -Path ("{0}:{1}" -f $RemoteName, $DirectoryPath) -PathType 'Remote'
-} else {
-    $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
-}
+$baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
 
 function Get-LatestMonth {
     param(

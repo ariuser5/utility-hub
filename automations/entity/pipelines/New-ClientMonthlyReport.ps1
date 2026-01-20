@@ -38,13 +38,6 @@ function New-MonthlyReportParamsPsd1Text {
     )
 
     $path = ($Values.Path ?? '').ToString()
-    if (-not $path) {
-        $legacyRemoteName = ($Values.RemoteName ?? 'gdrive').ToString()
-        $legacyDirectoryPath = ($Values.DirectoryPath ?? '').ToString()
-        if ($legacyDirectoryPath) {
-            $path = ("{0}:{1}" -f $legacyRemoteName, $legacyDirectoryPath)
-        }
-    }
 
     $pathType = ($Values.PathType ?? 'Auto').ToString()
     $startYear = $Values.StartYear
@@ -201,14 +194,6 @@ while ($true) {
 
     $path = ($paramsData['Path'] ?? '').ToString().Trim()
     $pathType = ($paramsData['PathType'] ?? 'Auto').ToString().Trim()
-
-    if (-not $path) {
-        $legacyRemoteName = ($paramsData['RemoteName'] ?? 'gdrive').ToString().Trim()
-        $legacyDirectoryPath = ($paramsData['DirectoryPath'] ?? '').ToString().Trim()
-        if ($legacyDirectoryPath) {
-            $path = ("{0}:{1}" -f $legacyRemoteName, $legacyDirectoryPath)
-        }
-    }
 
     $startYearRaw = ($paramsData['StartYear'] ?? (Get-Date).Year)
     $newFolderPrefix = ($paramsData['NewFolderPrefix'] ?? '_').ToString()

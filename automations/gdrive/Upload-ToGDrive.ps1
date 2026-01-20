@@ -1,22 +1,12 @@
-[
-    CmdletBinding(DefaultParameterSetName = 'Unified')
-]
+[CmdletBinding()]
 param(
     # Destination folder path (remote spec, e.g. "gdrive:clients/acme/archives")
-    [Parameter(Mandatory = $true, ParameterSetName = 'Unified')]
-    [Alias('DestinationPath')]
+    [Parameter(Mandatory = $true)]
     [string]$Destination,
 
-    [Parameter(ParameterSetName = 'Unified')]
+    [Parameter()]
     [ValidateSet('Auto', 'Remote')]
     [string]$DestinationPathType = 'Auto',
-
-    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
-    [string]$RemoteName = "gdrive",
-
-    # Destination folder path on Google Drive (remote-path-only; legacy)
-    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
-    [string]$DestinationPath,
 
     # Local file to upload
     [Parameter(Mandatory=$true)]
@@ -35,14 +25,9 @@ Import-Module $pathModule -Force
 
 $destInfo = $null
 try {
-    if ($PSCmdlet.ParameterSetName -eq 'LegacyRemote') {
-        $DestinationPath = ($DestinationPath ?? '').Replace('\\', '/').TrimStart('/')
-        $destInfo = Resolve-UtilityHubPath -Path ("{0}:{1}" -f $RemoteName, $DestinationPath) -PathType 'Remote'
-    } else {
-        $destInfo = Resolve-UtilityHubPath -Path $Destination -PathType $DestinationPathType
-        if ($destInfo.PathType -ne 'Remote') {
-            throw "Destination must be an rclone remote spec like '<remote>:<path>'. Destination='$Destination'"
-        }
+    $destInfo = Resolve-UtilityHubPath -Path $Destination -PathType $DestinationPathType
+    if ($destInfo.PathType -ne 'Remote') {
+        throw "Destination must be an rclone remote spec like '<remote>:<path>'. Destination='$Destination'"
     }
 } catch {
     Write-Error $_.Exception.Message

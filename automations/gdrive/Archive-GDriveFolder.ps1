@@ -1,20 +1,12 @@
-[
-    CmdletBinding(DefaultParameterSetName = 'Unified')
-]
+[CmdletBinding()]
 param(
     # Base folder path (local folder or rclone remote spec, e.g. "gdrive:clients/acme/inbox").
-    [Parameter(Mandatory = $true, ParameterSetName = 'Unified')]
+    [Parameter(Mandatory = $true)]
     [string]$Path,
 
-    [Parameter(ParameterSetName = 'Unified')]
+    [Parameter()]
     [ValidateSet('Auto', 'Local', 'Remote')]
     [string]$PathType = 'Auto',
-
-    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
-    [string]$RemoteName = "gdrive",
-    
-    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
-    [string]$FolderPath,
 
     # Optional list of file selectors (top-level basenames).
     # Each entry can be an exact name or a simple wildcard pattern using:
@@ -47,12 +39,7 @@ Import-Module $pathModule -Force
 
 $baseInfo = $null
 try {
-    if ($PSCmdlet.ParameterSetName -eq 'LegacyRemote') {
-        $normalizedFolderPath = ($FolderPath -replace '\\','/').Trim().Trim('/').TrimEnd('/')
-        $baseInfo = Resolve-UtilityHubPath -Path ("{0}:{1}" -f $RemoteName, $normalizedFolderPath) -PathType 'Remote'
-    } else {
-        $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
-    }
+    $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
 } catch {
     Write-Error $_.Exception.Message
     exit 1

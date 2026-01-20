@@ -7,7 +7,6 @@
 #
 # Usage:
 #   .\Copy-ToMonthFolder.ps1 -SourcePath "C:\local\files" -DestinationPath "gdrive:path/to/_jan-2025"
-#   .\Copy-ToMonthFolder.ps1 -SourceFolder "C:\local\files" -TargetPath "gdrive:path/to/_jan-2025"  # legacy
 #
 # Parameters:
 #   -SourcePath        Source folder path (local or rclone remote spec)
@@ -26,11 +25,9 @@
 ]
 param(
     [Parameter(Mandatory = $true)]
-    [Alias('SourceFolder')]
     [string]$SourcePath,
 
     [Parameter(Mandatory = $true)]
-    [Alias('TargetPath')]
     [string]$DestinationPath,
 
     [Parameter()]

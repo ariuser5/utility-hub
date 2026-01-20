@@ -6,13 +6,10 @@ Orchestrates the creation of a new monthly report folder on Google Drive and cop
 
 Usage:
     .\New-ClientMonthlyReport.ps1 -Path "gdrive:path/to/dir" [-PathType Auto|Local|Remote] [-StartYear 2025] [-NewFolderPrefix "_"]
-    .\New-ClientMonthlyReport.ps1 -RemoteName "gdrive" -DirectoryPath "path/to/dir" [-StartYear 2025] [-NewFolderPrefix "_"]  # legacy
 
 Parameters:
     -Path              Base folder where month folders live (local path or rclone remote spec)
     -PathType          Auto|Local|Remote (default: Auto)
-    -RemoteName        Name of rclone remote (legacy)
-    -DirectoryPath     Path on remote where month folders live (legacy)
     -StartYear         Year to start searching for missing months (default: current year)
     -NewFolderPrefix   Prefix for new folders (default: "_")
 
@@ -23,23 +20,14 @@ Behavior:
     - Prints progress and summary output
 -------------------------------------------------------------------------------
 #>
-[
-    CmdletBinding(DefaultParameterSetName = 'Unified')
-]
+[CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true, ParameterSetName = 'Unified')]
+    [Parameter(Mandatory = $true)]
     [string]$Path,
 
-    [Parameter(ParameterSetName = 'Unified')]
+    [Parameter()]
     [ValidateSet('Auto', 'Local', 'Remote')]
     [string]$PathType = 'Auto',
-
-    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
-    [string]$RemoteName = "gdrive",
-
-    # Remote directory path on Google Drive where month folders live (legacy)
-    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
-    [string]$DirectoryPath,
 
     # Start year to check (default: current year)
     [int]$StartYear = (Get-Date).Year,
@@ -59,18 +47,7 @@ $templateFolder = Join-Path $scriptDir "..\resources\monthly_report_template"
 $pathModule = Join-Path $scriptDir "..\helpers\Path.psm1"
 Import-Module $pathModule -Force
 
-$basePath = $null
-$basePathType = 'Auto'
-if ($PSCmdlet.ParameterSetName -eq 'LegacyRemote') {
-    $DirectoryPath = ($DirectoryPath ?? '').Replace('\\', '/').Trim('/')
-    $basePath = "{0}:{1}" -f $RemoteName, $DirectoryPath
-    $basePathType = 'Remote'
-} else {
-    $basePath = $Path
-    $basePathType = $PathType
-}
-
-$baseInfo = Resolve-UtilityHubPath -Path $basePath -PathType $basePathType
+$baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
 
 # Validate scripts exist
 if (-not (Test-Path $ensureScriptPath)) {

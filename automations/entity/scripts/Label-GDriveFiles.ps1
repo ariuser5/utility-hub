@@ -15,13 +15,13 @@ Key behaviors:
 
 Examples:
     # Label any file that does not already start with a label
-  .\Label-GDriveFiles.ps1 -FolderPath "clients/acme/inbox" -Labels INVOICE,BALANCE,EXPENSE
+    .\Label-GDriveFiles.ps1 -Path "gdrive:clients/acme/inbox" -Labels INVOICE,BALANCE,EXPENSE
 
   # Exclude some names entirely from processing
-  .\Label-GDriveFiles.ps1 -FolderPath "clients/acme/inbox" -ExcludeNameRegex '^(README|_ignore)\\b' -Labels INVOICE,BALANCE,EXPENSE
+    .\Label-GDriveFiles.ps1 -Path "gdrive:clients/acme/inbox" -ExcludeNameRegex '^(README|_ignore)\\b' -Labels INVOICE,BALANCE,EXPENSE
 
   # Read labels from file
-  .\Label-GDriveFiles.ps1 -FolderPath "clients/acme/inbox" -LabelsFilePath "..\resources\gdrive-labels.txt"
+    .\Label-GDriveFiles.ps1 -Path "gdrive:clients/acme/inbox" -LabelsFilePath "..\resources\gdrive-labels.txt"
 -------------------------------------------------------------------------------
 #>
 
@@ -34,13 +34,6 @@ param(
     [Parameter(ParameterSetName = 'Unified')]
     [ValidateSet('Auto', 'Local', 'Remote')]
     [string]$PathType = 'Auto',
-
-    [Parameter(ParameterSetName = 'LegacyRemote')]
-    [string]$RemoteName = "gdrive",
-
-    # Remote folder path on Google Drive (no trailing slash needed)
-    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
-    [string]$FolderPath,
 
     # If provided, files with basenames matching this regex are excluded from processing entirely
     [Parameter()]
@@ -737,12 +730,7 @@ Import-Module $pathModule -Force
 
 $baseInfo = $null
 try {
-    if ($PSCmdlet.ParameterSetName -eq 'LegacyRemote') {
-        $normalizedFolderPath = ($FolderPath -replace '\\','/').Trim().Trim('/').TrimEnd('/')
-        $baseInfo = Resolve-UtilityHubPath -Path ("{0}:{1}" -f $RemoteName, $normalizedFolderPath) -PathType 'Remote'
-    } else {
-        $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
-    }
+    $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
 } catch {
     Write-Error $_.Exception.Message
     exit 1

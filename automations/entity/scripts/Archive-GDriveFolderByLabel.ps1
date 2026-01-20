@@ -12,14 +12,14 @@ This script intentionally reuses the generic GDrive archiver:
   automations/gdrive/Archive-GDriveFolder.ps1
 
 Examples:
-  # Default: zip archives uploaded to <FolderPath>/archives
-  .\Archive-GDriveFolderByLabel.ps1 -FolderPath "clients/acme/inbox"
+    # Default: zip archives uploaded to <Path>/archives
+    .\Archive-GDriveFolderByLabel.ps1 -Path "gdrive:clients/acme/inbox"
 
   # Use 7z
-  .\Archive-GDriveFolderByLabel.ps1 -FolderPath "clients/acme/inbox" -ArchiveExtension "7z"
+    .\Archive-GDriveFolderByLabel.ps1 -Path "gdrive:clients/acme/inbox" -ArchiveExtension "7z"
 
   # Use tar.gz and upload elsewhere
-  .\Archive-GDriveFolderByLabel.ps1 -FolderPath "clients/acme/inbox" -ArchiveExtension "tar.gz" -ArchiveDestinationPath "clients/acme/archives"
+    .\Archive-GDriveFolderByLabel.ps1 -Path "gdrive:clients/acme/inbox" -ArchiveExtension "tar.gz" -ArchiveDestinationPath "gdrive:clients/acme/archives"
 -------------------------------------------------------------------------------
 #>
 
@@ -33,15 +33,8 @@ param(
     [ValidateSet('Auto', 'Local', 'Remote')]
     [string]$PathType = 'Auto',
 
-    [Parameter(ParameterSetName = 'LegacyRemote')]
-    [string]$RemoteName = "gdrive",
-
-    # Remote folder path on Google Drive (no trailing slash needed)
-    [Parameter(Mandatory = $true, ParameterSetName = 'LegacyRemote')]
-    [string]$FolderPath,
-
     # Destination folder path on Google Drive to upload archives to.
-    # Defaults to a subfolder named 'archives' under -FolderPath.
+    # Defaults to a subfolder named 'archives' under -Path.
     [Parameter()]
     [string]$ArchiveDestinationPath,
 
@@ -76,12 +69,7 @@ Import-Module $pathModule -Force
 
 $baseInfo = $null
 try {
-    if ($PSCmdlet.ParameterSetName -eq 'LegacyRemote') {
-        $normalizedFolderPath = ($FolderPath -replace '\\','/').Trim().Trim('/').TrimEnd('/')
-        $baseInfo = Resolve-UtilityHubPath -Path ("{0}:{1}" -f $RemoteName, $normalizedFolderPath) -PathType 'Remote'
-    } else {
-        $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
-    }
+    $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
 } catch {
     Write-Error $_.Exception.Message
     exit 1
@@ -340,16 +328,16 @@ try {
 
             # Reuse generic archiver to produce the archive locally
             if ($fileNames) {
-                $created = & $archiveFolderScript -RemoteName $baseInfo.RemoteName -FolderPath $baseInfo.RemotePath -FileNames $fileNames -ArchiveExtension $archiveExt -SevenZipExe $SevenZipExe -OutputPath $archivePath
+                $created = & $archiveFolderScript -Path $baseInfo.Normalized -PathType 'Remote' -FileNames $fileNames -ArchiveExtension $archiveExt -SevenZipExe $SevenZipExe -OutputPath $archivePath
             } else {
-                $created = & $archiveFolderScript -RemoteName $baseInfo.RemoteName -FolderPath $baseInfo.RemotePath -FilePattern $include -ExcludePattern $exclude -ArchiveExtension $archiveExt -SevenZipExe $SevenZipExe -OutputPath $archivePath
+                $created = & $archiveFolderScript -Path $baseInfo.Normalized -PathType 'Remote' -ArchiveExtension $archiveExt -SevenZipExe $SevenZipExe -OutputPath $archivePath
             }
             if (-not $created) {
                 throw "Archive creation produced no output path for label '$label'."
             }
 
             Write-Host "[$label] Uploading archive..." -ForegroundColor Yellow
-            & $uploadScript -RemoteName $uploadRemoteName -DestinationPath $uploadRemotePath -LocalFilePath $archivePath -Overwrite:$Overwrite
+            & $uploadScript -Destination ("{0}:{1}" -f $uploadRemoteName, $uploadRemotePath) -LocalFilePath $archivePath -Overwrite:$Overwrite
 
             Write-Host "[$label] ✓ Done" -ForegroundColor Green
         }
