@@ -315,10 +315,13 @@ function Invoke-InteractiveForItem {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Basename,
+        [object]$ItemInfo,
 
         [Parameter(Mandatory = $true)]
-        [string]$RemoteItem,
+        [string]$PathType,
+
+        [Parameter(Mandatory = $true)]
+        [string]$BasePath,
 
         [Parameter(Mandatory = $true)]
         [string[]]$ResolvedLabels,
@@ -330,23 +333,31 @@ function Invoke-InteractiveForItem {
         [int]$DefaultChoiceIndex
     )
 
+    $Basename = $ItemInfo.Basename
+
     $actionChoices = @(
         [System.Management.Automation.Host.ChoiceDescription]::new("&Label", "Select a label from the configured list"),
         [System.Management.Automation.Host.ChoiceDescription]::new("&Custom", "Enter a custom label"),
         [System.Management.Automation.Host.ChoiceDescription]::new("&Skip", "Skip this file"),
-        [System.Management.Automation.Host.ChoiceDescription]::new("&Open", "Open this file in your browser"),
         [System.Management.Automation.Host.ChoiceDescription]::new("&Quit", "Stop processing")
     )
+
+    if ($PathType -eq 'Remote') {
+        $actionChoices = @($actionChoices[0..2]) + @(
+            [System.Management.Automation.Host.ChoiceDescription]::new("&Open", "Open this file in your browser")
+        ) + @($actionChoices[3])
+    }
 
     while ($true) {
         $choice = $Host.UI.PromptForChoice("Action", "Choose an action for: $Basename", $actionChoices, $DefaultChoiceIndex)
 
-        if ($choice -eq 4) {
+        if (($PathType -eq 'Remote' -and $choice -eq 4) -or ($PathType -eq 'Local' -and $choice -eq 3)) {
             return [pscustomobject]@{ Outcome = 'quit' }
         }
 
-        if ($choice -eq 3) {
-            $url = Get-DriveBrowserUrl -RemoteItemPath $RemoteItem -FallbackQuery $Basename
+        if ($PathType -eq 'Remote' -and $choice -eq 3) {
+            $remoteItem = "$BasePath/$($ItemInfo.RemoteRelPath)"
+            $url = Get-DriveBrowserUrl -RemoteItemPath $remoteItem -FallbackQuery $Basename
             Write-Host "Opening: $url" -ForegroundColor Gray
             Start-Process $url | Out-Null
             Write-Host "(If it doesn't open correctly, Drive search fallback is used automatically when ID lookup fails.)" -ForegroundColor DarkGray
@@ -388,21 +399,43 @@ function Invoke-InteractiveForItem {
 
         $desired = "[$label] $Basename"
         $targetBasename = Get-UniqueBasename -DesiredBasename $desired -ExistingNames $ExistingNames
-        $targetRemote = "$remoteFolder/$targetBasename"
 
-        if ($PSCmdlet.ShouldProcess($RemoteItem, "Rename to $targetRemote")) {
-            Write-Host "Renaming to: $targetBasename" -ForegroundColor Yellow
-            & rclone moveto $RemoteItem $targetRemote
-            if ($LASTEXITCODE -ne 0) {
-                Write-Error "Rename failed (exit $LASTEXITCODE): $Basename -> $targetBasename"
-                continue
+        if ($PathType -eq 'Remote') {
+            $remoteItem = "$BasePath/$($ItemInfo.RemoteRelPath)"
+            $targetRemote = "$BasePath/$targetBasename"
+
+            if ($PSCmdlet.ShouldProcess($remoteItem, "Rename to $targetRemote")) {
+                Write-Host "Renaming to: $targetBasename" -ForegroundColor Yellow
+                & rclone moveto $remoteItem $targetRemote
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Error "Rename failed (exit $LASTEXITCODE): $Basename -> $targetBasename"
+                    continue
+                }
+
+                [void]$ExistingNames.Remove($Basename)
+                [void]$ExistingNames.Add($targetBasename)
+
+                Write-Host "✓ Renamed" -ForegroundColor Green
+                return [pscustomobject]@{ Outcome = 'renamed'; NewBasename = $targetBasename }
             }
+        } else {
+            # Local
+            $src = $ItemInfo.LocalFileInfo.FullName
 
-            [void]$ExistingNames.Remove($Basename)
-            [void]$ExistingNames.Add($targetBasename)
+            if ($PSCmdlet.ShouldProcess($src, "Rename to $targetBasename")) {
+                Write-Host "Renaming to: $targetBasename" -ForegroundColor Yellow
+                try {
+                    Rename-Item -LiteralPath $src -NewName $targetBasename -ErrorAction Stop
+                    [void]$ExistingNames.Remove($Basename)
+                    [void]$ExistingNames.Add($targetBasename)
 
-            Write-Host "✓ Renamed" -ForegroundColor Green
-            return [pscustomobject]@{ Outcome = 'renamed'; NewBasename = $targetBasename }
+                    Write-Host "✓ Renamed" -ForegroundColor Green
+                    return [pscustomobject]@{ Outcome = 'renamed'; NewBasename = $targetBasename }
+                } catch {
+                    Write-Error "Rename failed: $Basename -> $targetBasename. $_"
+                    continue
+                }
+            }
         }
 
         return [pscustomobject]@{ Outcome = 'noop' }
@@ -574,163 +607,87 @@ if ($baseInfo.PathType -eq 'Local') {
     if ($allowedLabelsRegex) { Write-Host "Already-labeled pattern: $($allowedLabelsRegex.ToString())" -ForegroundColor DarkGray }
     if ($ExcludeNameRegex) { Write-Host "ExcludeNameRegex: $ExcludeNameRegex" -ForegroundColor Gray }
     Write-Host ""
-
-    function Get-LocalRenameTarget {
-        param(
-            [Parameter(Mandatory = $true)][string]$Folder,
-            [Parameter(Mandatory = $true)][string]$Label,
-            [Parameter(Mandatory = $true)][string]$OriginalName
-        )
-
-        $baseNew = "[{0}] {1}" -f $Label, $OriginalName
-        $candidate = $baseNew
-        $i = 2
-        while (Test-Path -LiteralPath (Join-Path $Folder $candidate) -PathType Leaf) {
-            $ext = [System.IO.Path]::GetExtension($baseNew)
-            $stem = [System.IO.Path]::GetFileNameWithoutExtension($baseNew)
-            if ($ext) {
-                $candidate = "{0} ({1}){2}" -f $stem, $i, $ext
-            } else {
-                $candidate = "{0} ({1})" -f $stem, $i
-            }
-            $i++
-            if ($i -gt 1000) { throw "Too many name collisions for '$OriginalName'" }
-        }
-
-        return $candidate
-    }
-
-    $all = Get-ChildItem -LiteralPath $baseInfo.LocalPath -File
-    if ($excludeRegexObj) {
-        $all = $all | Where-Object { -not $excludeRegexObj.IsMatch($_.Name) }
-    }
-
-    if (-not $all -or $all.Count -eq 0) {
-        Write-Host "No files to review (all excluded or none found)." -ForegroundColor Green
-        exit 0
-    }
-
-    $processed = 0
-    $renamed = 0
-    $alreadyLabeledSkipped = 0
-    $skipped = 0
-    $failed = 0
-
-    foreach ($fi in $all) {
-        $processed++
-        $basename = $fi.Name
-
-        $isAlready = ($allowedLabelsRegex -and $allowedLabelsRegex.IsMatch($basename)) -or (-not $allowedLabelsRegex -and $anyBracketLabelRegex.IsMatch($basename))
-        if ($isAlready) {
-            $alreadyLabeledSkipped++
-            continue
-        }
-
-        $chosen = $null
-        if ($AutoLabel) {
-            $chosen = $AutoLabel.Trim().Trim('[', ']')
-        } else {
-            Write-Host "File: $basename" -ForegroundColor Cyan
-            for ($i = 0; $i -lt $resolvedLabels.Count; $i++) {
-                Write-Host ("  {0}) {1}" -f ($i + 1), $resolvedLabels[$i]) -ForegroundColor Gray
-            }
-            $ans = Read-Host "Pick label number (Enter=skip)"
-            if (-not $ans) {
-                $skipped++
-                continue
-            }
-            $idx = 0
-            if (-not [int]::TryParse($ans, [ref]$idx) -or $idx -lt 1 -or $idx -gt $resolvedLabels.Count) {
-                Write-Host "Invalid selection; skipping." -ForegroundColor DarkYellow
-                $skipped++
-                continue
-            }
-            $chosen = $resolvedLabels[$idx - 1]
-        }
-
-        try {
-            $targetName = Get-LocalRenameTarget -Folder $baseInfo.LocalPath -Label $chosen -OriginalName $basename
-            $src = $fi.FullName
-            $dst = Join-Path $baseInfo.LocalPath $targetName
-
-            if ($PSCmdlet.ShouldProcess($src, "Rename to $targetName")) {
-                Rename-Item -LiteralPath $src -NewName $targetName
-                $renamed++
-            }
-        } catch {
-            Write-Error "Rename failed: $basename. $_"
-            $failed++
-        }
-    }
-
-    Write-Host "" 
-    Write-Host "Processed:       $processed" -ForegroundColor Gray
-    Write-Host "Renamed:         $renamed" -ForegroundColor Gray
-    Write-Host "Already labeled: $alreadyLabeledSkipped" -ForegroundColor Gray
-    Write-Host "Skipped:         $skipped" -ForegroundColor Gray
-    Write-Host "Failed:          $failed" -ForegroundColor Gray
-
-    exit (if ($failed -gt 0) { 2 } else { 0 })
 }
 
-if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
-    Write-Error "rclone not found on PATH. Install it (e.g., 'winget install Rclone.Rclone') and ensure it's available in your session."
-    exit 1
+if ($baseInfo.PathType -eq 'Remote') {
+    if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
+        Write-Error "rclone not found on PATH. Install it (e.g., 'winget install Rclone.Rclone') and ensure it's available in your session."
+        exit 1
+    }
+
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "GDrive Labeling" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "Remote folder: $($baseInfo.Normalized)" -ForegroundColor Gray
+    Write-Host "Labels: $($resolvedLabels -join ', ')" -ForegroundColor Gray
+    if ($allowedLabelsRegex) { Write-Host "Already-labeled pattern: $($allowedLabelsRegex.ToString())" -ForegroundColor DarkGray }
+    if ($ExcludeNameRegex) { Write-Host "ExcludeNameRegex: $ExcludeNameRegex" -ForegroundColor Gray }
+    Write-Host ""
 }
-
-$remoteFolder = $baseInfo.Normalized.TrimEnd('/')
-
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "GDrive Labeling" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Remote folder: $remoteFolder" -ForegroundColor Gray
-Write-Host "Labels: $($resolvedLabels -join ', ')" -ForegroundColor Gray
-if ($allowedLabelsRegex) { Write-Host "Already-labeled pattern: $($allowedLabelsRegex.ToString())" -ForegroundColor DarkGray }
-if ($ExcludeNameRegex) { Write-Host "ExcludeNameRegex: $ExcludeNameRegex" -ForegroundColor Gray }
-Write-Host "" 
 
 # List files (top-level only)
-try {
-    $files = Get-RcloneJson -RcloneArguments @('lsjson', $remoteFolder, '--files-only')
-} catch {
-    Write-Error "Failed to list files in '$remoteFolder'. Ensure rclone is configured and the path exists. $_"
-    exit 1
-}
-
-# Build items and detect duplicates (Drive can contain duplicate titles; rclone path operations become ambiguous)
+Write-Host "Listing files..." -ForegroundColor Yellow
 $items = @()
-$nameCounts = @{}
-foreach ($f in $files) {
-    $relPath = $null
-    if ($f.PSObject.Properties.Name -contains 'Path' -and $f.Path) {
-        $relPath = $f.Path
-    } elseif ($f.PSObject.Properties.Name -contains 'Name' -and $f.Name) {
-        $relPath = $f.Name
+
+if ($baseInfo.PathType -eq 'Remote') {
+    $remoteFolder = $baseInfo.Normalized.TrimEnd('/')
+    
+    try {
+        $files = Get-RcloneJson -RcloneArguments @('lsjson', $remoteFolder, '--files-only')
+    } catch {
+        Write-Error "Failed to list files in '$remoteFolder'. Ensure rclone is configured and the path exists. $_"
+        exit 1
     }
 
-    $basename = if ($relPath) { Split-Path -Path $relPath -Leaf } else { $null }
-    if (-not $basename) { continue }
+    # Build items and detect duplicates (Drive can contain duplicate titles; rclone path operations become ambiguous)
+    $nameCounts = @{}
+    foreach ($f in $files) {
+        $relPath = $null
+        if ($f.PSObject.Properties.Name -contains 'Path' -and $f.Path) {
+            $relPath = $f.Path
+        } elseif ($f.PSObject.Properties.Name -contains 'Name' -and $f.Name) {
+            $relPath = $f.Name
+        }
 
-    $lower = $basename.ToLowerInvariant()
-    if ($nameCounts.ContainsKey($lower)) {
-        $nameCounts[$lower] = $nameCounts[$lower] + 1
-    } else {
-        $nameCounts[$lower] = 1
+        $basename = if ($relPath) { Split-Path -Path $relPath -Leaf } else { $null }
+        if (-not $basename) { continue }
+
+        $lower = $basename.ToLowerInvariant()
+        if ($nameCounts.ContainsKey($lower)) {
+            $nameCounts[$lower] = $nameCounts[$lower] + 1
+        } else {
+            $nameCounts[$lower] = 1
+        }
+
+        $items += [pscustomobject]@{
+            Basename = $basename
+            RemoteRelPath = $relPath
+        }
     }
 
-    $items += [pscustomobject]@{
-        Basename = $basename
-        RemoteRelPath = $relPath
+    $dups = $nameCounts.GetEnumerator() | Where-Object { $_.Value -gt 1 } | Sort-Object Name
+    if ($dups -and $dups.Count -gt 0) {
+        Write-Error "Duplicate basenames detected in '$remoteFolder'. Aborting to avoid ambiguous operations."
+        foreach ($d in $dups) {
+            Write-Host " - $($d.Name) ($($d.Value)x)" -ForegroundColor Red
+        }
+        exit 1
     }
-}
+} else {
+    # Local mode
+    try {
+        $localFiles = Get-ChildItem -LiteralPath $baseInfo.LocalPath -File
+    } catch {
+        Write-Error "Failed to list files in '$($baseInfo.LocalPath)'."
+        exit 1
+    }
 
-$dups = $nameCounts.GetEnumerator() | Where-Object { $_.Value -gt 1 } | Sort-Object Name
-if ($dups -and $dups.Count -gt 0) {
-    Write-Error "Duplicate basenames detected in '$remoteFolder'. Aborting to avoid ambiguous operations."
-    foreach ($d in $dups) {
-        Write-Host " - $($d.Name) ($($d.Value)x)" -ForegroundColor Red
+    foreach ($f in $localFiles) {
+        $items += [pscustomobject]@{
+            Basename = $f.Name
+            LocalFileInfo = $f
+        }
     }
-    exit 1
 }
 
 # Build existing basename set for collision detection
@@ -950,13 +907,20 @@ for ($i = 0; $i -lt $toPick.Count; $i++) {
     $pickedProcessed++
     $it = $toPick[$i]
     $basename = $it.Basename
-    $remoteItem = "$remoteFolder/$($it.RemoteRelPath)"
 
     $isAlready = ($allowedLabelsRegex -and $allowedLabelsRegex.IsMatch($basename)) -or (-not $allowedLabelsRegex -and $anyBracketLabelRegex.IsMatch($basename))
     $defaultChoice = if ($isAlready) { 2 } else { 0 }
 
     Write-Host "[pick $pickedProcessed/$($toPick.Count)] $basename" -ForegroundColor Cyan
-    $result = Invoke-InteractiveForItem -Basename $basename -RemoteItem $remoteItem -ResolvedLabels $resolvedLabels -ExistingNames $existingNames -DefaultChoiceIndex $defaultChoice
+    
+    # Determine base path for rename operations
+    $basePath = if ($baseInfo.PathType -eq 'Remote') {
+        $baseInfo.Normalized.TrimEnd('/')
+    } else {
+        $baseInfo.LocalPath
+    }
+    
+    $result = Invoke-InteractiveForItem -ItemInfo $it -PathType $baseInfo.PathType -BasePath $basePath -ResolvedLabels $resolvedLabels -ExistingNames $existingNames -DefaultChoiceIndex $defaultChoice
 
     if ($result.Outcome -eq 'quit') {
         Write-Host "Stopping at user request." -ForegroundColor Yellow
