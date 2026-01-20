@@ -265,11 +265,32 @@ function Open-InEditor {
     }
 }
 
-function Automations-Menu {
+function Run-NewClientMonthlyReportAutomation {
+    $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
+    $runner = Join-Path $repoRoot 'automations\entity\pipelines\New-ClientMonthlyReport.ps1'
+
+    if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
+        throw "Curated automation runner not found: $runner"
+    }
+
+    Write-Host ''
+    Write-Info 'Launching curated automation: New Client Monthly Report'
+    Write-Host ''
+
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $runner
+    $exitCode = $LASTEXITCODE
+
+    Write-Host ''
+    Write-Info "Automation finished (exit code: $exitCode)"
+    Write-Host ''
+    Read-Host 'Press Enter to continue'
+}
+
+function Browse-AutomationScriptsPlaceholder {
     while ($true) {
         Clear-Host
-        Write-Heading 'Automations'
-        Write-Info 'These are placeholders: open scripts or print suggested commands.'
+        Write-Heading 'Automation scripts'
+        Write-Info 'Placeholders: open scripts or print suggested commands.'
         Write-Host ''
 
         $automations = @(Get-AutomationScripts)
@@ -305,6 +326,40 @@ function Automations-Menu {
                 Read-Host 'Press Enter to continue'
                 continue
             }
+        }
+    }
+}
+
+function Automations-Menu {
+    while ($true) {
+        Clear-Host
+        Write-Heading 'Automations'
+        Write-Info 'Curated automations + script shortcuts.'
+        Write-Host ''
+
+        Write-Host '[1] New client monthly report (run)' -ForegroundColor Gray
+        Write-Host '[2] Browse automation scripts (placeholders)' -ForegroundColor Gray
+        Write-Host '[b] Back' -ForegroundColor Gray
+        Write-Host '[q] Quit' -ForegroundColor Gray
+
+        Write-Host ''
+        $choice = Read-Host 'Select'
+        if ($null -eq $choice) { continue }
+        $choice = $choice.Trim()
+
+        if ($choice.Equals('b', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return
+        }
+
+        if ($choice.Equals('q', [System.StringComparison]::OrdinalIgnoreCase)) {
+            Request-Quit
+            return
+        }
+
+        switch ($choice) {
+            '1' { Run-NewClientMonthlyReportAutomation }
+            '2' { Browse-AutomationScriptsPlaceholder }
+            default { Write-Warn 'Invalid selection.'; Start-Sleep -Milliseconds 700 }
         }
     }
 }
@@ -357,7 +412,7 @@ while ($true) {
 
     Write-Host '[1] Browse clients (navigation preview)' -ForegroundColor Gray
     Write-Host '[2] Preview accountant (navigation preview)' -ForegroundColor Gray
-    Write-Host '[3] Automations (placeholders)' -ForegroundColor Gray
+    Write-Host '[3] Automations' -ForegroundColor Gray
     Write-Host '[4] Settings' -ForegroundColor Gray
     Write-Host '[q] Quit' -ForegroundColor Gray
 
