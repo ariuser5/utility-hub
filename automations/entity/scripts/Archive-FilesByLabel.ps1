@@ -1,6 +1,6 @@
 <#
 -------------------------------------------------------------------------------
-Archive-GDriveFolderByLabel.ps1
+Archive-FilesByLabel.ps1
 -------------------------------------------------------------------------------
 Helper: creates one archive per label for top-level files in a Google Drive
 folder and uploads the archives back to Google Drive.
@@ -13,13 +13,13 @@ This script intentionally reuses the generic GDrive archiver:
 
 Examples:
     # Default: zip archives uploaded to <Path>/archives
-    .\Archive-GDriveFolderByLabel.ps1 -Path "gdrive:clients/acme/inbox"
+    .\Archive-FilesByLabel.ps1 -Path "gdrive:clients/acme/inbox"
 
   # Use 7z
-    .\Archive-GDriveFolderByLabel.ps1 -Path "gdrive:clients/acme/inbox" -ArchiveExtension "7z"
+    .\Archive-FilesByLabel.ps1 -Path "gdrive:clients/acme/inbox" -ArchiveExtension "7z"
 
   # Use tar.gz and upload elsewhere
-    .\Archive-GDriveFolderByLabel.ps1 -Path "gdrive:clients/acme/inbox" -ArchiveExtension "tar.gz" -ArchiveDestinationPath "gdrive:clients/acme/archives"
+    .\Archive-FilesByLabel.ps1 -Path "gdrive:clients/acme/inbox" -ArchiveExtension "tar.gz" -ArchiveDestinationPath "gdrive:clients/acme/archives"
 -------------------------------------------------------------------------------
 #>
 
@@ -175,7 +175,7 @@ if ($baseInfo.PathType -eq 'Remote') {
 }
 
 if (-not $basenames) {
-    Write-Warning "No files found in '$remoteFolder'"
+    Write-Warning "No files found in '$($baseInfo.Normalized)'"
     return
 }
 
@@ -310,37 +310,37 @@ try {
 
         if ($baseInfo.PathType -eq 'Remote') {
             if ($PSCmdlet.ShouldProcess("${uploadRemoteName}:$uploadRemotePath", "Create + upload archive for label '$label'")) {
-            Write-Host "`n[$label] Creating archive..." -ForegroundColor Yellow
+                Write-Host "`n[$label] Creating archive..." -ForegroundColor Yellow
 
-            $include = $null
-            $exclude = $null
-            $fileNames = $null
-            if ($label -eq $UnlabeledGroupName) {
-                # Unlabeled = explicit set of basenames (avoid rclone glob escaping issues)
-                $fileNames = @(
-                    $g.Group |
-                        ForEach-Object { $_.Basename } |
-                        Where-Object { $_ -and $_.Trim() }
-                )
-            } else {
-                $fileNames = @(Get-LabelFileSelector -Label $label)
+                $include = $null
+                $exclude = $null
+                $fileNames = $null
+                if ($label -eq $UnlabeledGroupName) {
+                    # Unlabeled = explicit set of basenames (avoid rclone glob escaping issues)
+                    $fileNames = @(
+                        $g.Group |
+                            ForEach-Object { $_.Basename } |
+                            Where-Object { $_ -and $_.Trim() }
+                    )
+                } else {
+                    $fileNames = @(Get-LabelFileSelector -Label $label)
+                }
+
+                # Reuse generic archiver to produce the archive locally
+                if ($fileNames) {
+                    $created = & $archiveFolderScript -Path $baseInfo.Normalized -PathType 'Remote' -FileNames $fileNames -ArchiveExtension $archiveExt -SevenZipExe $SevenZipExe -OutputPath $archivePath
+                } else {
+                    $created = & $archiveFolderScript -Path $baseInfo.Normalized -PathType 'Remote' -ArchiveExtension $archiveExt -SevenZipExe $SevenZipExe -OutputPath $archivePath
+                }
+                if (-not $created) {
+                    throw "Archive creation produced no output path for label '$label'."
+                }
+
+                Write-Host "[$label] Uploading archive..." -ForegroundColor Yellow
+                & $uploadScript -Destination ("{0}:{1}" -f $uploadRemoteName, $uploadRemotePath) -LocalFilePath $archivePath -Overwrite:$Overwrite
+
+                Write-Host "[$label] ✓ Done" -ForegroundColor Green
             }
-
-            # Reuse generic archiver to produce the archive locally
-            if ($fileNames) {
-                $created = & $archiveFolderScript -Path $baseInfo.Normalized -PathType 'Remote' -FileNames $fileNames -ArchiveExtension $archiveExt -SevenZipExe $SevenZipExe -OutputPath $archivePath
-            } else {
-                $created = & $archiveFolderScript -Path $baseInfo.Normalized -PathType 'Remote' -ArchiveExtension $archiveExt -SevenZipExe $SevenZipExe -OutputPath $archivePath
-            }
-            if (-not $created) {
-                throw "Archive creation produced no output path for label '$label'."
-            }
-
-            Write-Host "[$label] Uploading archive..." -ForegroundColor Yellow
-            & $uploadScript -Destination ("{0}:{1}" -f $uploadRemoteName, $uploadRemotePath) -LocalFilePath $archivePath -Overwrite:$Overwrite
-
-            Write-Host "[$label] ✓ Done" -ForegroundColor Green
-        }
         } else {
             if ($PSCmdlet.ShouldProcess($ArchiveDestinationPath, "Create archive for label '$label'")) {
                 Write-Host "`n[$label] Creating archive..." -ForegroundColor Yellow

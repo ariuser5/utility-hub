@@ -20,10 +20,7 @@
 #   - Uses rclone for any copy where either side is remote
 #   - Prints progress and summary output
 # -----------------------------------------------------------------------------
-[
-    CmdletBinding()
-]
-param(
+[CmdletBinding()] param(
     [Parameter(Mandatory = $true)]
     [string]$SourcePath,
 
@@ -41,7 +38,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$pathModule = Join-Path $PSScriptRoot '..\\helpers\\Path.psm1'
+$pathModule = Join-Path $PSScriptRoot '../helpers/Path.psm1'
 Import-Module $pathModule -Force
 
 $src = Resolve-UtilityHubPath -Path $SourcePath -PathType $SourcePathType
