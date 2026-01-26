@@ -92,15 +92,15 @@ Implementation: the preview UI is shared and lives in [automations/utils/Preview
 
 ## Scripts
 
-### Archive-GDriveFolderByLabel.ps1
+### Archive-FilesByLabel.ps1
 
 Creates one archive per label for top-level files in a Google Drive folder (labels like `[INVOICE] file.pdf`) and uploads the archives back to Google Drive.
 
 Examples:
 
-- Create ZIP archives under `<FolderPath>/archives`:
-	- `./scripts/Archive-GDriveFolderByLabel.ps1 -FolderPath "clients/acme/inbox"`
+- Create ZIP archives under `<Path>/archives`:
+	- `./scripts/Archive-FilesByLabel.ps1 -Path "gdrive:clients/acme/inbox"`
 - Use 7z:
-	- `./scripts/Archive-GDriveFolderByLabel.ps1 -FolderPath "clients/acme/inbox" -ArchiveExtension 7z`
+	- `./scripts/Archive-FilesByLabel.ps1 -Path "gdrive:clients/acme/inbox" -ArchiveExtension 7z`
 - Use tar.gz and upload elsewhere:
-	- `./scripts/Archive-GDriveFolderByLabel.ps1 -FolderPath "clients/acme/inbox" -ArchiveExtension tar.gz -ArchiveDestinationPath "clients/acme/archives"`
+	- `./scripts/Archive-FilesByLabel.ps1 -Path "gdrive:clients/acme/inbox" -ArchiveExtension tar.gz -ArchiveDestinationPath "gdrive:clients/acme/archives"`

@@ -1,9 +1,12 @@
+[CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)]
-    [string]$RemoteName = "gdrive",
-    
-    [Parameter(Mandatory=$true)]
-    [string]$FolderPath,
+    # Base folder path (local folder or rclone remote spec, e.g. "gdrive:clients/acme/inbox").
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+
+    [Parameter()]
+    [ValidateSet('Auto', 'Local', 'Remote')]
+    [string]$PathType = 'Auto',
 
     # Optional list of file selectors (top-level basenames).
     # Each entry can be an exact name or a simple wildcard pattern using:
@@ -30,6 +33,17 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+$pathModule = Join-Path $PSScriptRoot '..\entity\helpers\Path.psm1'
+Import-Module $pathModule -Force
+
+$baseInfo = $null
+try {
+    $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
+} catch {
+    Write-Error $_.Exception.Message
+    exit 1
+}
 
 function ConvertTo-ArchiveExtension {
     param([Parameter(Mandatory = $true)][string]$Ext)
@@ -156,7 +170,7 @@ if (-not $OutputPath -or -not $OutputPath.Trim()) {
 }
 
 Write-Host "Starting Google Drive archive process..." -ForegroundColor Cyan
-Write-Host "  Remote: $RemoteName`:$FolderPath" -ForegroundColor Gray
+Write-Host "  Folder: $($baseInfo.Normalized)" -ForegroundColor Gray
 if ($FileNames -and $FileNames.Count -gt 0) {
     Write-Host "  FileNames: $($FileNames.Count) selector(s)" -ForegroundColor Gray
 } else {
@@ -177,7 +191,18 @@ $createdFiles = New-Object System.Collections.Generic.List[string]
 
 try {
     Write-Host "`nListing files..." -ForegroundColor Yellow
-    $remotePath = "${RemoteName}:${FolderPath}"
+    $remotePath = $baseInfo.Normalized
+
+    if ($baseInfo.PathType -eq 'Remote') {
+        if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
+            Write-Error "rclone not found on PATH. Install it and ensure it's available in your session."
+            exit 1
+        }
+    } else {
+        if (-not (Test-Path -LiteralPath $baseInfo.LocalPath -PathType Container)) {
+            throw "Input folder not found: $($baseInfo.LocalPath)"
+        }
+    }
 
     $filterArgs = @('--include', "$FilePattern")
     if ($ExcludePattern) {
@@ -185,7 +210,12 @@ try {
     }
 
     if ($FileNames -and $FileNames.Count -gt 0) {
-        $allFiles = rclone lsf "$remotePath" --files-only
+        $allFiles = $null
+        if ($baseInfo.PathType -eq 'Remote') {
+            $allFiles = rclone lsf "$remotePath" --files-only
+        } else {
+            $allFiles = Get-ChildItem -LiteralPath $baseInfo.LocalPath -File | Select-Object -ExpandProperty Name
+        }
 
         $selectors = @($FileNames | ForEach-Object { $_.Trim() } | Where-Object { $_ })
         if (-not $selectors -or $selectors.Count -eq 0) {
@@ -218,7 +248,19 @@ try {
             $unmatched | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkYellow }
         }
     } else {
-        $files = rclone lsf "$remotePath" --files-only @filterArgs
+        if ($baseInfo.PathType -eq 'Remote') {
+            $files = rclone lsf "$remotePath" --files-only @filterArgs
+        } else {
+            # Local mode: implement include/exclude as simple wildcards over basenames.
+            $includeRegex = if ($FilePattern) { [regex](ConvertTo-SimpleWildcardRegex -Pattern $FilePattern) } else { $null }
+            $excludeRegex = if ($ExcludePattern) { [regex](ConvertTo-SimpleWildcardRegex -Pattern $ExcludePattern) } else { $null }
+            $files = Get-ChildItem -LiteralPath $baseInfo.LocalPath -File | ForEach-Object { $_.Name } | Where-Object {
+                $n = $_
+                if ($includeRegex -and -not $includeRegex.IsMatch($n)) { return $false }
+                if ($excludeRegex -and $excludeRegex.IsMatch($n)) { return $false }
+                return $true
+            }
+        }
     }
 
     if (-not $files) {
@@ -235,15 +277,22 @@ try {
 
     Write-Host "`nDownloading files..." -ForegroundColor Yellow
 
-    if ($FileNames -and $FileNames.Count -gt 0) {
-        # Use --files-from for exact selection (robust for bracketed filenames).
-        $filesFrom = Join-Path $env:TEMP ("rclone_files-from_" + [System.Guid]::NewGuid().ToString() + ".txt")
-        Set-Content -LiteralPath $filesFrom -Value ($files | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -Encoding UTF8
-        $createdFiles.Add($filesFrom)
+    if ($baseInfo.PathType -eq 'Remote') {
+        if ($FileNames -and $FileNames.Count -gt 0) {
+            # Use --files-from for exact selection (robust for bracketed filenames).
+            $filesFrom = Join-Path $env:TEMP ("rclone_files-from_" + [System.Guid]::NewGuid().ToString() + ".txt")
+            Set-Content -LiteralPath $filesFrom -Value ($files | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -Encoding UTF8
+            $createdFiles.Add($filesFrom)
 
-        rclone copy "$remotePath" $tempDir --files-from $filesFrom --progress
+            rclone copy "$remotePath" $tempDir --files-from $filesFrom --progress
+        } else {
+            rclone copy "$remotePath" $tempDir @filterArgs --progress
+        }
     } else {
-        rclone copy "$remotePath" $tempDir @filterArgs --progress
+        foreach ($f in $files) {
+            $src = Join-Path $baseInfo.LocalPath $f
+            Copy-Item -LiteralPath $src -Destination $tempDir -Force
+        }
     }
 
     # Record downloaded files (only files, not directories)

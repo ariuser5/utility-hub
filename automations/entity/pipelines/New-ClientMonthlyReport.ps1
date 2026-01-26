@@ -1,126 +1,291 @@
 <#
 -------------------------------------------------------------------------------
-New-ClientMonthlyReport.ps1
+New-ClientMonthlyReport.ps1 (Curated)
 -------------------------------------------------------------------------------
-Orchestrates the creation of a new monthly report folder on Google Drive and copies template files into it.
+Curated automation wrapper that provides a git-rebase-like "edit then resume" flow
+for running the pipeline:
+    automations/entity/scripts/New-ClientMonthlyReport.ps1
 
-Usage:
-    .\New-ClientMonthlyReport.ps1 -RemoteName "gdrive" -DirectoryPath "path/to/dir" [-StartYear 2025] [-NewFolderPrefix "_"]
+It opens a .psd1 params file in your editor, validates it, and then executes the
+pipeline in a separate pwsh process.
 
-Parameters:
-    -RemoteName        Name of rclone remote (default: "gdrive")
-    -DirectoryPath     Path on remote where month folders live (required)
-    -StartYear         Year to start searching for missing months (default: current year)
-    -NewFolderPrefix   Prefix for new folders (default: "_")
-
-Behavior:
-    - Calls Ensure-MonthFolder.ps1 to create the next missing month folder (with prefix)
-    - If a folder is created, calls Copy-ToMonthFolder.ps1 to copy template files into it
-    - Template files are sourced from resources/monthly_report_template/
-    - Prints progress and summary output
+Persisted config (separate from contacts static data):
+  %LOCALAPPDATA%\utility-hub\data\entity\New-ClientMonthlyReport.psd1
 -------------------------------------------------------------------------------
 #>
+
+[CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)]
-    [string]$RemoteName = "gdrive",
+    # Optional: override persisted params file path.
+    [Parameter()]
+    [string]$ParamsPath,
 
-    # Remote directory path on Google Drive where month folders live
-    [Parameter(Mandatory=$true)]
-    [string]$DirectoryPath,
+    # Optional: skip opening editor; just run using current params file.
+    [Parameter()]
+    [switch]$NoEdit,
 
-    # Start year to check (default: current year)
-    [int]$StartYear = (Get-Date).Year,
-
-    # Prefix to use when creating a fresh folder (default: underscore)
-    [string]$NewFolderPrefix = "_"
+    # Optional: do not write back the last successful params to the persisted file.
+    [Parameter()]
+    [switch]$NoSave
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 
-# Paths
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ensureScriptPath = Join-Path $scriptDir "..\scripts\Ensure-MonthFolder.ps1"
-$copyScriptPath = Join-Path $scriptDir "..\scripts\Copy-ToMonthFolder.ps1"
-$templateFolder = Join-Path $scriptDir "..\resources\monthly_report_template"
+function New-MonthlyReportParamsPsd1Text {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Values
+    )
 
-# Validate scripts exist
-if (-not (Test-Path $ensureScriptPath)) {
-    Write-Error "Ensure-MonthFolder.ps1 not found at: $ensureScriptPath"
-    exit 1
+    $path = ($Values.Path ?? '').ToString()
+
+    $pathType = ($Values.PathType ?? 'Auto').ToString()
+    $startYear = $Values.StartYear
+    if (-not $startYear) { $startYear = (Get-Date).Year }
+    $newFolderPrefix = ($Values.NewFolderPrefix ?? '_').ToString()
+
+    # .psd1 uses single-quoted strings here; escape embedded single quotes.
+    $path = $path.Replace("'", "''")
+    $pathType = $pathType.Replace("'", "''")
+    $newFolderPrefix = $newFolderPrefix.Replace("'", "''")
+
+    @(
+        "# UtilityHub: New Client Monthly Report params",
+        "#",
+        "# Edit values below, then close the editor to continue.",
+        "#",
+        "# Commands (rebase-like):",
+        "#   - Set _Command = 'abort' to exit without running",
+        "#   - Set _Command = 'reset' to regenerate defaults and reopen",
+        "#",
+        "# Notes:",
+        "#   - Path can be a local folder (e.g. 'C:\\path\\to\\dir') or an rclone remote spec (e.g. 'gdrive:path/to/dir').",
+        "#   - PathType is usually 'Auto'. Use 'Local' or 'Remote' to force interpretation.",
+        "",
+        "@{",
+        "    _Command       = $null",
+        "    Path           = '$path'",
+        "    PathType       = '$pathType'",
+        "    StartYear      = $startYear",
+        "    NewFolderPrefix = '$newFolderPrefix'",
+        "}"
+    ) -join [Environment]::NewLine
 }
 
-if (-not (Test-Path $copyScriptPath)) {
-    Write-Error "Copy-ToMonthFolder.ps1 not found at: $copyScriptPath"
-    exit 1
+function Write-ParamsErrorHeader {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string]$ErrorMessage
+    )
+
+    $existing = ''
+    if (Test-Path -LiteralPath $FilePath -PathType Leaf) {
+        $existing = Get-Content -LiteralPath $FilePath -Raw -ErrorAction SilentlyContinue
+    }
+
+    $stamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    $header = @(
+        "# ERROR ($stamp)",
+        "# $ErrorMessage",
+        "# Fix and close the editor to continue.",
+        ""
+    ) -join [Environment]::NewLine
+
+    Set-Content -LiteralPath $FilePath -Value ($header + ($existing ?? '')) -Encoding UTF8
 }
 
-if (-not (Test-Path $templateFolder -PathType Container)) {
-    Write-Error "Template folder not found at: $templateFolder"
-    exit 1
+function Get-DefaultParamsPath {
+    if ($ParamsPath -and $ParamsPath.Trim()) {
+        return $ParamsPath
+    }
+
+    if (-not $env:LOCALAPPDATA) {
+        # Fallback: keep it per-machine temp if LOCALAPPDATA isn't available.
+        return (Join-Path ([System.IO.Path]::GetTempPath()) 'utility-hub-New-ClientMonthlyReport.psd1')
+    }
+
+    return (Join-Path (Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'utility-hub') 'data') 'entity') 'New-ClientMonthlyReport.psd1')
 }
 
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Creating New Monthly Report" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host ""
+$persistedPath = Get-DefaultParamsPath
 
-# Step 1: Ensure month folder exists
-Write-Host "[1/2] Creating month folder on Google Drive..." -ForegroundColor Yellow
+# Ensure persisted parent directory exists (when using LOCALAPPDATA layout).
 try {
-    $ensureOutput = & $ensureScriptPath `
-        -RemoteName $RemoteName `
-        -DirectoryPath $DirectoryPath `
-        -StartYear $StartYear `
-        -NewFolderPrefix $NewFolderPrefix
-    
+    $persistedDir = Split-Path -Parent $persistedPath
+    if ($persistedDir -and -not (Test-Path -LiteralPath $persistedDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $persistedDir -Force | Out-Null
+    }
+} catch {
+    # Directory creation failure should be handled later; allow temp-only flow.
+}
+
+# Seed values from persisted file if possible.
+$seed = @{}
+if (Test-Path -LiteralPath $persistedPath -PathType Leaf) {
+    try {
+        $loaded = Import-PowerShellDataFile -Path $persistedPath
+        if ($loaded -is [hashtable]) {
+            $seed = $loaded
+        }
+    } catch {
+        # We'll surface parse errors in the edit loop.
+    }
+}
+
+$tmpEdit = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("utility-hub-new-client-monthly-report-{0}.psd1" -f ([guid]::NewGuid().ToString('N')))
+$resetCount = 0
+
+# Write initial temp file.
+Set-Content -LiteralPath $tmpEdit -Value (New-MonthlyReportParamsPsd1Text -Values $seed) -Encoding UTF8
+
+$editorModule = Join-Path $PSScriptRoot '..\helpers\Editor.psm1'
+Import-Module $editorModule -Force
+
+$pathModule = Join-Path $PSScriptRoot '..\helpers\Path.psm1'
+Import-Module $pathModule -Force
+
+while ($true) {
+    if (-not $NoEdit) {
+        $editResult = Invoke-UtilityHubEditor -FilePath $tmpEdit
+        if ($editResult -and $editResult.Mode -eq 'abort') {
+            Write-Host 'Aborted (no changes made).' -ForegroundColor Yellow
+            Remove-Item -LiteralPath $tmpEdit -ErrorAction SilentlyContinue
+            exit 0
+        }
+    }
+
+    $paramsData = $null
+    try {
+        $paramsData = Import-PowerShellDataFile -Path $tmpEdit
+    } catch {
+        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage ("Params file failed to parse as .psd1: {0}" -f $_.Exception.Message)
+        $NoEdit = $false
+        continue
+    }
+
+    if (-not ($paramsData -is [hashtable])) {
+        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage 'Params file must evaluate to a hashtable (@{ ... }).'
+        $NoEdit = $false
+        continue
+    }
+
+    $cmd = ($paramsData['_Command'] ?? '').ToString().Trim()
+    if ($cmd) {
+        if ($cmd.Equals('abort', [System.StringComparison]::OrdinalIgnoreCase)) {
+            Write-Host 'Aborted (no changes made).' -ForegroundColor Yellow
+            Remove-Item -LiteralPath $tmpEdit -ErrorAction SilentlyContinue
+            exit 0
+        }
+
+        if ($cmd.Equals('reset', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $resetCount++
+            if ($resetCount -ge 5) {
+                throw 'Too many resets; exiting.'
+            }
+            Set-Content -LiteralPath $tmpEdit -Value (New-MonthlyReportParamsPsd1Text -Values @{}) -Encoding UTF8
+            $NoEdit = $false
+            continue
+        }
+
+        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage "Unknown _Command '$cmd'. Use 'abort' or 'reset'."
+        $NoEdit = $false
+        continue
+    }
+
+    $path = ($paramsData['Path'] ?? '').ToString().Trim()
+    $pathType = ($paramsData['PathType'] ?? 'Auto').ToString().Trim()
+
+    $startYearRaw = ($paramsData['StartYear'] ?? (Get-Date).Year)
+    $newFolderPrefix = ($paramsData['NewFolderPrefix'] ?? '_').ToString()
+
+    if (-not $path) {
+        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage 'Path is required.'
+        $NoEdit = $false
+        continue
+    }
+
+    if ($pathType -notin @('Auto', 'Local', 'Remote')) {
+        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage "PathType must be one of: Auto, Local, Remote."
+        $NoEdit = $false
+        continue
+    }
+
+    $startYear = 0
+    if (-not [int]::TryParse($startYearRaw.ToString(), [ref]$startYear)) {
+        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage 'StartYear must be an integer.'
+        $NoEdit = $false
+        continue
+    }
+    if ($startYear -lt 2000 -or $startYear -gt 2100) {
+        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage 'StartYear looks out of range (expected 2000..2100).'
+        $NoEdit = $false
+        continue
+    }
+
+    $baseInfo = $null
+    try {
+        $baseInfo = Resolve-UtilityHubPath -Path $path -PathType $pathType
+    } catch {
+        Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage $_.Exception.Message
+        $NoEdit = $false
+        continue
+    }
+
+    if ($baseInfo.PathType -eq 'Remote') {
+        if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
+            Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage "rclone not found on PATH. Install rclone and/or restart the shell."
+            $NoEdit = $false
+            continue
+        }
+
+        # Quick sanity check that the remote path is accessible.
+        try {
+            & rclone lsf $baseInfo.Normalized --max-depth 1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "rclone lsf failed (exit $LASTEXITCODE)"
+            }
+        } catch {
+            Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage ("Remote path not accessible: {0}. {1}" -f $baseInfo.Normalized, $_.Exception.Message)
+            $NoEdit = $false
+            continue
+        }
+    } else {
+        if (-not (Test-Path -LiteralPath $baseInfo.LocalPath -PathType Container)) {
+            Write-ParamsErrorHeader -FilePath $tmpEdit -ErrorMessage ("Local path not accessible: {0}. Ensure the directory exists." -f $baseInfo.LocalPath)
+            $NoEdit = $false
+            continue
+        }
+    }
+
+    # Persist last good params (separate from contacts static data).
+    if (-not $NoSave) {
+        $toSave = @{
+            Path            = $baseInfo.Normalized
+            PathType        = $pathType
+            StartYear       = $startYear
+            NewFolderPrefix = $newFolderPrefix
+        }
+        try {
+            Set-Content -LiteralPath $persistedPath -Value (New-MonthlyReportParamsPsd1Text -Values $toSave) -Encoding UTF8
+        } catch {
+            Write-Host "Warning: failed to write params file: $persistedPath" -ForegroundColor DarkYellow
+            Write-Host $_.Exception.Message -ForegroundColor DarkYellow
+        }
+    }
+
+    $pipelineScript = Join-Path $PSScriptRoot '..\scripts\New-ClientMonthlyReport.ps1'
+    $pipelineScript = (Resolve-Path -LiteralPath $pipelineScript -ErrorAction Stop).Path
+
+    Write-Host ''
+    Write-Host "Running monthly report automation..." -ForegroundColor Cyan
+    Write-Host "  Script: $pipelineScript" -ForegroundColor DarkGray
+    Write-Host "  Path:   $($baseInfo.Normalized)" -ForegroundColor DarkGray
+    Write-Host "  Type:   $($baseInfo.PathType)" -ForegroundColor DarkGray
+    Write-Host ''
+
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $pipelineScript -Path $baseInfo.Normalized -PathType $baseInfo.PathType -StartYear $startYear -NewFolderPrefix $newFolderPrefix
     $exitCode = $LASTEXITCODE
-} catch {
-    Write-Error "Failed to run Ensure-MonthFolder.ps1: $_"
-    exit 1
+
+    Remove-Item -LiteralPath $tmpEdit -ErrorAction SilentlyContinue
+    exit $exitCode
 }
-
-# Parse output
-$createdPath = $null
-foreach ($line in $ensureOutput) {
-    if ($line -match '^CREATED:(.+)$') {
-        $createdPath = $Matches[1]
-        break
-    }
-}
-
-if ($exitCode -ne 0 -or $null -eq $createdPath) {
-    Write-Host ""
-    Write-Host "No new folder was created. Output from Ensure-MonthFolder.ps1:" -ForegroundColor Yellow
-    $ensureOutput | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
-    Write-Host ""
-    Write-Host "Exiting without copying files." -ForegroundColor Yellow
-    exit 0
-}
-
-Write-Host "      ✓ Folder created: $createdPath" -ForegroundColor Green
-Write-Host ""
-
-# Step 2: Copy template files to the new folder
-Write-Host "[2/2] Copying template files to new folder..." -ForegroundColor Yellow
-try {
-    $copyOutput = & $copyScriptPath `
-        -SourceFolder $templateFolder `
-        -TargetPath $createdPath
-    
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Copy-ToMonthFolder.ps1 failed with exit code $LASTEXITCODE"
-        exit 2
-    }
-} catch {
-    Write-Error "Failed to run Copy-ToMonthFolder.ps1: $_"
-    exit 2
-}
-
-Write-Host ""
-Write-Host "========================================" -ForegroundColor Green
-Write-Host "✓ Monthly Report Initialized" -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Green
-Write-Host "Location: $createdPath" -ForegroundColor Gray
-Write-Host ""
-
-exit 0
