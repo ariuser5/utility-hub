@@ -216,9 +216,7 @@ function Preview-Accountant {
 }
 
 function Get-AutomationScripts {
-    $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
-    # Folder name remains 'pipelines' for now; UI calls these 'Automations'.
-    $automationsDir = Join-Path $repoRoot 'automations\entity\pipelines'
+    $automationsDir = Join-Path $PSScriptRoot '.\automation-scripts'
 
     if (-not (Test-Path -LiteralPath $automationsDir -PathType Container)) {
         return @()
@@ -264,25 +262,20 @@ function Open-InEditor {
     }
 }
 
-function Run-NewClientMonthlyReportAutomation {
-    $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
-    $runner = Join-Path $repoRoot 'automations\entity\pipelines\New-ClientMonthlyReport.ps1'
+function Run-Automation {
+    param([Parameter(Mandatory = $true)][string]$AutomationPath)
 
-    if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
-        throw "Curated automation runner not found: $runner"
+    if (-not (Test-Path -LiteralPath $AutomationPath -PathType Leaf)) {
+        throw "Automation not found: $AutomationPath"
     }
 
     Write-Host ''
-    Write-Info 'Launching curated automation: New Client Monthly Report'
-    Write-Host ''
-
-    & pwsh -NoProfile -ExecutionPolicy Bypass -File $runner
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $AutomationPath
     $exitCode = $LASTEXITCODE
 
     Write-Host ''
     Write-Info "Automation finished (exit code: $exitCode)"
     Write-Host ''
-    Read-Host 'Press Enter to continue'
 }
 
 
@@ -290,31 +283,21 @@ function Automations-Menu {
     while ($true) {
         Clear-Host
         Write-Heading 'Automations'
-        Write-Info 'Curated automations + script shortcuts.'
+        Write-Info 'Available automations.'
         Write-Host ''
 
-        Write-Host '[1] New client monthly report (run)' -ForegroundColor Gray
-        Write-Host '[b] Back' -ForegroundColor Gray
-        Write-Host '[q] Quit' -ForegroundColor Gray
-
-        Write-Host ''
-        $choice = Read-Host 'Select'
-        if ($null -eq $choice) { continue }
-        $choice = $choice.Trim()
-
-        if ($choice.Equals('b', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $automations = @(Get-AutomationScripts)
+        if (-not $automations -or $automations.Count -eq 0) {
+            Write-Warn 'No automations found.'
+            Write-Host ''
+            Read-Host 'Press Enter to go back'
             return
         }
 
-        if ($choice.Equals('q', [System.StringComparison]::OrdinalIgnoreCase)) {
-            Request-Quit
-            return
-        }
+        $automation = Select-FromList -Title 'Select automation' -Items $automations -ItemLabel 'automations' -AllowQuit
+        if ($null -eq $automation -or -not $automation.FullPath) { return }
 
-        switch ($choice) {
-            '1' { Run-NewClientMonthlyReportAutomation }
-            default { Write-Warn 'Invalid selection.'; Start-Sleep -Milliseconds 700 }
-        }
+        Run-Automation -AutomationPath $automation.FullPath
     }
 }
 
