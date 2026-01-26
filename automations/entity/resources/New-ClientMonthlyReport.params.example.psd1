@@ -15,7 +15,7 @@
 @{
     _Command        = $null
     Path            = 'path/on/drive/where/month/folders/live'
-    PathType        = 'RemoteDirectory'
+    PathType        = 'Auto'
     StartYear       = 2026
     NewFolderPrefix = '_'
 }
