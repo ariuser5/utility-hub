@@ -50,7 +50,7 @@ function New-MonthlyReportParamsPsd1Text {
     $newFolderPrefix = $newFolderPrefix.Replace("'", "''")
 
     @(
-        "# utility-hub: New Client Monthly Report params",
+        "# UtilityHub: New Client Monthly Report params",
         "#",
         "# Edit values below, then close the editor to continue.",
         "#",

@@ -1,4 +1,4 @@
-# utility-hub: New Client Monthly Report params (example)
+# UtilityHub: New Client Monthly Report params (example)
 #
 # Save a copy to:
 #   %LOCALAPPDATA%\utility-hub\data\entity\New-ClientMonthlyReport.psd1
@@ -9,13 +9,13 @@
 #   - Set _Command = 'reset' to regenerate defaults and reopen
 #
 # Notes:
-#   - DirectoryPath must be the REMOTE path only (no 'gdrive:' prefix).
-#   - The pipeline constructs RemoteSpec as: <RemoteName>:<DirectoryPath>
+#   - Path must be the REMOTE path only (no 'gdrive:' prefix).
+#   - The pipeline uses Path and PathType to construct the remote specification.
 
 @{
-    _Command       = $null
-    RemoteName     = 'gdrive'
-    DirectoryPath  = 'path/on/drive/where/month/folders/live'
-    StartYear      = 2026
+    _Command        = $null
+    Path            = 'path/on/drive/where/month/folders/live'
+    PathType        = 'Auto'
+    StartYear       = 2026
     NewFolderPrefix = '_'
 }

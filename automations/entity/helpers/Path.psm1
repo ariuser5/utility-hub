@@ -17,9 +17,9 @@ function Resolve-UtilityHubPath {
         throw 'Path is required.'
     }
 
-    $isWindowsDrive = ($p -match '^[A-Za-z]:(\\|/|$)')
+    $isWindowsDrive = ($p -match '^[A-Za-z]:([/\\]|$)')
     $isUnc = ($p -match '^(\\\\|//)')
-    $looksRemote = ($p -match '^[^\\/]+:.+$' -or $p -match '^[^\\/]+:$')
+    $looksRemote = ($p -match '^[^/\\]+:.+$' -or $p -match '^[^/\\]+:$')
     if ($isWindowsDrive -or $isUnc) {
         $looksRemote = $false
     }
@@ -29,7 +29,7 @@ function Resolve-UtilityHubPath {
         $effectiveType = if ($looksRemote) { 'Remote' } else { 'Local' }
     }
 
-    if ($effectiveType -eq 'Local' -and ($p -match '^[^\\/]+:.+$') -and -not $isWindowsDrive) {
+    if ($effectiveType -eq 'Local' -and ($p -match '^[^/\\]+:.+$') -and -not $isWindowsDrive) {
         throw "Path looks like an rclone remote spec. Use -PathType Remote or provide a local path. Path='$p'"
     }
 
