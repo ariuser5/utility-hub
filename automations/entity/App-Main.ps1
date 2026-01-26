@@ -285,49 +285,6 @@ function Run-NewClientMonthlyReportAutomation {
     Read-Host 'Press Enter to continue'
 }
 
-function Browse-AutomationScriptsPlaceholder {
-    while ($true) {
-        Clear-Host
-        Write-Heading 'Automation scripts'
-        Write-Info 'Placeholders: open scripts or print suggested commands.'
-        Write-Host ''
-
-        $automations = @(Get-AutomationScripts)
-        if (-not $automations -or $automations.Count -eq 0) {
-            Write-Warn 'No automations found.'
-            Write-Host ''
-            Read-Host 'Press Enter to go back'
-            return
-        }
-
-        $p = Select-FromList -Title 'Select automation' -Items $automations -ItemLabel 'automations' -AllowQuit
-        if ($null -eq $p -or -not $p.FullPath) { return }
-
-        while ($true) {
-            Clear-Host
-            Write-Heading "Automation: $($p.Name)"
-            Write-Info "Path: $($p.FullPath)"
-            Write-Host ''
-
-            $action = Prompt-Choice -Prompt "Actions: [o] open, [c] show command, [b] back" -Valid @('o','c','b')
-            if ($action -ieq 'b') { break }
-
-            if ($action -ieq 'o') {
-                Open-InEditor -Path $p.FullPath
-                continue
-            }
-
-            if ($action -ieq 'c') {
-                Write-Host ''
-                Write-Info 'Suggested command:'
-                Write-Host ('pwsh -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $p.FullPath) -ForegroundColor Gray
-                Write-Host ''
-                Read-Host 'Press Enter to continue'
-                continue
-            }
-        }
-    }
-}
 
 function Automations-Menu {
     while ($true) {
@@ -337,7 +294,6 @@ function Automations-Menu {
         Write-Host ''
 
         Write-Host '[1] New client monthly report (run)' -ForegroundColor Gray
-        Write-Host '[2] Browse automation scripts (placeholders)' -ForegroundColor Gray
         Write-Host '[b] Back' -ForegroundColor Gray
         Write-Host '[q] Quit' -ForegroundColor Gray
 
@@ -357,7 +313,6 @@ function Automations-Menu {
 
         switch ($choice) {
             '1' { Run-NewClientMonthlyReportAutomation }
-            '2' { Browse-AutomationScriptsPlaceholder }
             default { Write-Warn 'Invalid selection.'; Start-Sleep -Milliseconds 700 }
         }
     }
