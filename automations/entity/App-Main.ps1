@@ -238,6 +238,17 @@ function Get-AutomationScripts {
         }
     }
 
+    # 3. Custom user-defined location (via environment variable)
+    if ($env:AUTOMATION_SCRIPTS_PATH) {
+        $customDir = $env:AUTOMATION_SCRIPTS_PATH.Trim()
+        if ($customDir -and (Test-Path -LiteralPath $customDir -PathType Container)) {
+            $customFiles = @(Get-ChildItem -LiteralPath $customDir -File -Filter '*.ps1' -ErrorAction SilentlyContinue)
+            if ($customFiles -and $customFiles.Count -gt 0) {
+                $allFiles += $customFiles
+            }
+        }
+    }
+
     if ($allFiles.Count -eq 0) {
         return @()
     }
