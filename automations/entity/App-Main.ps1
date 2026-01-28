@@ -216,18 +216,33 @@ function Preview-Accountant {
 }
 
 function Get-AutomationScripts {
-    $automationsDir = Join-Path $PSScriptRoot '.\automation-scripts'
+    $allFiles = @()
 
-    if (-not (Test-Path -LiteralPath $automationsDir -PathType Container)) {
+    # 1. Built-in automations (relative to this script)
+    $builtInDir = Join-Path $PSScriptRoot '.\automation-scripts'
+    if (Test-Path -LiteralPath $builtInDir -PathType Container) {
+        $builtInFiles = @(Get-ChildItem -LiteralPath $builtInDir -File -Filter '*.ps1' -ErrorAction SilentlyContinue)
+        if ($builtInFiles -and $builtInFiles.Count -gt 0) {
+            $allFiles += $builtInFiles
+        }
+    }
+
+    # 2. User automations (LOCALAPPDATA)
+    if ($env:LOCALAPPDATA) {
+        $userDir = Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'utility-hub') 'automations') 'automation-scripts'
+        if (Test-Path -LiteralPath $userDir -PathType Container) {
+            $userFiles = @(Get-ChildItem -LiteralPath $userDir -File -Filter '*.ps1' -ErrorAction SilentlyContinue)
+            if ($userFiles -and $userFiles.Count -gt 0) {
+                $allFiles += $userFiles
+            }
+        }
+    }
+
+    if ($allFiles.Count -eq 0) {
         return @()
     }
 
-    $files = @(Get-ChildItem -LiteralPath $automationsDir -File -Filter '*.ps1' -ErrorAction Stop)
-    if (-not $files -or $files.Count -eq 0) {
-        return @()
-    }
-
-    return $files |
+    return $allFiles |
         Sort-Object Name |
         ForEach-Object {
             [pscustomobject]@{
@@ -243,6 +258,10 @@ function Run-Automation {
     if (-not (Test-Path -LiteralPath $AutomationPath -PathType Leaf)) {
         throw "Automation not found: $AutomationPath"
     }
+
+    # Set environment variable pointing to utility-hub root for automations to access helpers
+    $utilityHubRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    $env:UTILITY_HUB_ROOT = $utilityHubRoot
 
     Write-Host ''
     & pwsh -NoProfile -ExecutionPolicy Bypass -File $AutomationPath
