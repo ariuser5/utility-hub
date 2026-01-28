@@ -259,9 +259,10 @@ function Run-Automation {
         throw "Automation not found: $AutomationPath"
     }
 
-    # Set environment variable pointing to utility-hub root for automations to access helpers
+    # Set environment variables for automations
     $utilityHubRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     $env:UTILITY_HUB_ROOT = $utilityHubRoot
+    $env:APP_DIR = $PSScriptRoot
 
     Write-Host ''
     & pwsh -NoProfile -ExecutionPolicy Bypass -File $AutomationPath
