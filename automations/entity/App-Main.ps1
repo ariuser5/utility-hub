@@ -353,9 +353,9 @@ while ($true) {
     Write-Info "Clients: $clientCount"
     Write-Host ''
 
-    Write-Host '[1] Browse clients (navigation preview)' -ForegroundColor Gray
-    Write-Host '[2] Preview accountant (navigation preview)' -ForegroundColor Gray
-    Write-Host '[3] Automations' -ForegroundColor Gray
+    Write-Host '[1] Automations' -ForegroundColor Gray
+    Write-Host '[2] Browse clients (navigation preview)' -ForegroundColor Gray
+    Write-Host '[3] Preview accountant (navigation preview)' -ForegroundColor Gray
     Write-Host '[4] Settings' -ForegroundColor Gray
     Write-Host '[q] Quit' -ForegroundColor Gray
 
@@ -370,9 +370,9 @@ while ($true) {
 
     try {
         switch ($choice) {
-            '1' { Browse-Clients }
-            '2' { Preview-Accountant }
-            '3' { Automations-Menu }
+            '1' { Automations-Menu }
+            '2' { Browse-Clients }
+            '3' { Preview-Accountant }
             '4' { Show-Settings }
             default { Write-Warn 'Invalid selection.'; Start-Sleep -Milliseconds 700 }
         }
