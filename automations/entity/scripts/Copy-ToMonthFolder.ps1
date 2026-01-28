@@ -84,6 +84,20 @@ Write-Host "  Source: $($src.Normalized)" -ForegroundColor Gray
 Write-Host "  Destination: $($dst.Normalized)" -ForegroundColor Gray
 Write-Host ""
 
+# Print files being copied when source is local
+if ($src.PathType -eq 'Local') {
+    try {
+        $localFiles = @(Get-ChildItem -LiteralPath $src.LocalPath -Recurse -File -ErrorAction Stop)
+        foreach ($file in $localFiles) {
+            $relativePath = [System.IO.Path]::GetRelativePath($src.LocalPath, $file.FullName)
+            Write-Host "  -> $relativePath" -ForegroundColor Gray
+        }
+        Write-Host ""
+    } catch {
+        Write-Warn "Failed to enumerate source files: $_"
+    }
+}
+
 if ($src.PathType -eq 'Local' -and $dst.PathType -eq 'Local') {
     try {
         if (-not (Test-Path -LiteralPath $dst.LocalPath -PathType Container)) {
