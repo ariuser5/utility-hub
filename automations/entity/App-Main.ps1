@@ -237,31 +237,6 @@ function Get-AutomationScripts {
         }
 }
 
-function Open-InEditor {
-    param([Parameter(Mandatory = $true)][string]$Path)
-
-    # Simple editor selection (aligned with README expectations).
-    $editor = $env:UTILITY_HUB_EDITOR
-    if (-not $editor) { $editor = $env:VISUAL }
-    if (-not $editor) { $editor = $env:EDITOR }
-    if (-not $editor) { $editor = 'notepad.exe' }
-
-    # If user specifies just 'code', ensure it waits.
-    if ($editor.Trim().Equals('code', [System.StringComparison]::OrdinalIgnoreCase)) {
-        $editor = 'code --wait'
-    }
-
-    Write-Info "Opening in editor: $editor"
-
-    try {
-        # Keep it simple: use PowerShell's command line parsing rules.
-        & $editor $Path
-    } catch {
-        Write-Warn "Failed to open editor '$editor'. Try setting UTILITY_HUB_EDITOR to a valid command (e.g., 'code --wait')."
-        Write-Warn $_.Exception.Message
-    }
-}
-
 function Run-Automation {
     param([Parameter(Mandatory = $true)][string]$AutomationPath)
 
