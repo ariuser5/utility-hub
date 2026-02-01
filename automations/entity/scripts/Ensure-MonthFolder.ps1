@@ -43,7 +43,7 @@ $ErrorActionPreference = "Stop"
 # Month short names mapping in order (jan..dec)
 $months = @("jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec")
 
-$pathModule = Join-Path $PSScriptRoot '..\helpers\Path.psm1'
+$pathModule = Join-Path $PSScriptRoot '..\..\utils\Path.psm1'
 Import-Module $pathModule -Force
 
 $monthPatternModule = Join-Path $PSScriptRoot '..\helpers\MonthPattern.psm1'

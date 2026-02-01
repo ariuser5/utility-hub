@@ -44,7 +44,7 @@ $ensureScriptPath = Join-Path $scriptDir "..\scripts\Ensure-MonthFolder.ps1"
 $copyScriptPath = Join-Path $scriptDir "..\scripts\Copy-ToMonthFolder.ps1"
 $templateFolder = Join-Path $scriptDir "..\resources\monthly_report_template"
 
-$pathModule = Join-Path $scriptDir "..\helpers\Path.psm1"
+$pathModule = Join-Path $scriptDir "..\..\utils\Path.psm1"
 Import-Module $pathModule -Force
 
 $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType

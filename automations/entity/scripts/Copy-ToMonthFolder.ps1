@@ -38,7 +38,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$pathModule = Join-Path $PSScriptRoot '../helpers/Path.psm1'
+$pathModule = Join-Path $PSScriptRoot '../../utils/Path.psm1'
 Import-Module $pathModule -Force
 
 $src = Resolve-UtilityHubPath -Path $SourcePath -PathType $SourcePathType

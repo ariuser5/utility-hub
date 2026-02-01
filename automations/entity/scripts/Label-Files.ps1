@@ -99,7 +99,7 @@ function Resolve-Labels {
 }
 
 # Editor module provides Invoke-UtilityHubEditor function
-$editorModule = Join-Path $PSScriptRoot '..\helpers\Editor.psm1'
+$editorModule = Join-Path $PSScriptRoot '..\..\utils\Editor.psm1'
 Import-Module $editorModule -Force
 
 function New-RebaseTodoText {
@@ -582,7 +582,7 @@ if ($ExcludeNameRegex) {
     $excludeRegexObj = [regex]$ExcludeNameRegex
 }
 
-$pathModule = Join-Path $PSScriptRoot '..\helpers\Path.psm1'
+$pathModule = Join-Path $PSScriptRoot '..\..\utils\Path.psm1'
 Import-Module $pathModule -Force
 
 $baseInfo = $null
