@@ -46,46 +46,28 @@ $months = @("jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","d
 $pathModule = Join-Path $PSScriptRoot '..\helpers\Path.psm1'
 Import-Module $pathModule -Force
 
+$monthPatternModule = Join-Path $PSScriptRoot '..\helpers\MonthPattern.psm1'
+Import-Module $monthPatternModule -Force
+
 $baseInfo = $null
 $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
 
-function Get-LatestMonth {
-    param(
-        [int]$Year
-    )
-
-    $existingDirs = @()
-    if ($baseInfo.PathType -eq 'Remote') {
-        try {
-            $existingDirs = rclone lsf $baseInfo.Normalized --dirs-only
-        } catch {
-            Write-Error "Failed to list remote directory '$($baseInfo.Normalized)'. Ensure rclone is configured and the path exists."
-            exit 1
-        }
-    } else {
-        try {
-            $existingDirs = Get-ChildItem -LiteralPath $baseInfo.LocalPath -Directory -ErrorAction Stop | Select-Object -ExpandProperty Name
-        } catch {
-            Write-Error "Failed to list local directory '$($baseInfo.LocalPath)'. Ensure the path exists."
-            exit 1
-        }
+# Get list of existing directories
+$existingDirs = @()
+if ($baseInfo.PathType -eq 'Remote') {
+    try {
+        $existingDirs = rclone lsf $baseInfo.Normalized --dirs-only
+    } catch {
+        Write-Error "Failed to list remote directory '$($baseInfo.Normalized)'. Ensure rclone is configured and the path exists."
+        exit 1
     }
-
-    $existingSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($d in $existingDirs) {
-        $name = ($d ?? '').ToString().TrimEnd('/')
-        [void]$existingSet.Add($name)
+} else {
+    try {
+        $existingDirs = Get-ChildItem -LiteralPath $baseInfo.LocalPath -Directory -ErrorAction Stop | Select-Object -ExpandProperty Name
+    } catch {
+        Write-Error "Failed to list local directory '$($baseInfo.LocalPath)'. Ensure the path exists."
+        exit 1
     }
-    $latestIdx = -1
-    for ($i = 0; $i -lt $months.Count; $i++) {
-        $m = $months[$i]
-        $expected = "$m-$Year"
-        $prefixed = "$NewFolderPrefix$expected"
-        if ($existingSet.Contains($expected) -or $existingSet.Contains($prefixed)) {
-            $latestIdx = $i
-        }
-    }
-    return $latestIdx
 }
 
 $where = if ($baseInfo.PathType -eq 'Remote') { 'remote' } else { 'local' }
@@ -94,7 +76,18 @@ Write-Host "Scanning $where directory: $($baseInfo.Normalized)" -ForegroundColor
 # Find the next month to create, recursing to next year if needed
 $currentYear = $StartYear
 while ($true) {
-    $latestIdx = Get-LatestMonth -Year $currentYear
+    # Filter directories for the current year
+    $yearDirs = $existingDirs | Where-Object { $_ -match "^_*[a-z]{3}-$currentYear$" }
+    
+    # Get the latest month for this year using the MonthPattern module
+    $latestMonth = Get-LatestMonthPattern -Values $yearDirs -SkipInvalid $true
+    
+    # Extract month index from the latest month
+    $latestIdx = -1
+    if ($latestMonth -and $latestMonth -match '^_*([a-z]{3})-\d{4}$') {
+        $monthName = $matches[1]
+        $latestIdx = $months.IndexOf($monthName.ToLower())
+    }
     if ($latestIdx -eq ($months.Count - 1)) {
         Write-Host "All months exist for $currentYear. Moving to next year..." -ForegroundColor Cyan
         $currentYear++
