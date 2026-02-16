@@ -8,7 +8,7 @@ namespace DCiuve.UtilityHub.Mailer.Send;
 
 internal static class GmailMessageSender
 {
-    public static async Task<string> SendAsync(GmailService service, SendParams sendParams, CancellationToken cancellationToken)
+    public static async Task<string> SendAsync(GmailService service, SendParams sendParams, bool createDraft, CancellationToken cancellationToken)
     {
         var fromEmail = await GmailBroker.GetAuthenticatedEmailAsync(service, cancellationToken).ConfigureAwait(false);
         var (body, isHtml) = SendParamsValidator.ResolveBodyOrThrow(sendParams);
@@ -36,8 +36,15 @@ internal static class GmailMessageSender
         var raw = Base64UrlEncode(mimeStream.ToArray());
 
         var gmailMessage = new Message { Raw = raw };
-        var response = await service.Users.Messages.Send(gmailMessage, "me").ExecuteAsync(cancellationToken).ConfigureAwait(false);
-        return response.Id ?? string.Empty;
+        if (createDraft)
+        {
+            var draft = new Draft { Message = gmailMessage };
+            var response = await service.Users.Drafts.Create(draft, "me").ExecuteAsync(cancellationToken).ConfigureAwait(false);
+            return response.Id ?? response.Message?.Id ?? string.Empty;
+        }
+
+        var sendResponse = await service.Users.Messages.Send(gmailMessage, "me").ExecuteAsync(cancellationToken).ConfigureAwait(false);
+        return sendResponse.Id ?? string.Empty;
     }
 
     private static string Base64UrlEncode(byte[] bytes)

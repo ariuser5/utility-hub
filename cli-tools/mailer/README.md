@@ -18,8 +18,13 @@ Auth
 - OAuth attempt times out after 5 minutes.
 
 Send
-- `mailer send [--credentials <path>] [--param-file <path>] --to <email> [--to <email> ...] --subject <text> (--body <text> | --body-file <path>) [--cc <email> ...] [--bcc <email> ...] [--attach <path> ...] [--is-html]`
+- `mailer send [--credentials <path>] [--param-file <path>] --to <email> [--to <email> ...] --subject <text> (--body <text> | --body-file <path>) [--cc <email> ...] [--bcc <email> ...] [--attach <path> ...] [--is-html] [--draft]`
 - If not authenticated yet, `send` triggers the same OAuth flow.
+
+Draft
+- `mailer draft [--credentials <path>] [--param-file <path>] --to <email> [--to <email> ...] --subject <text> (--body <text> | --body-file <path>) [--cc <email> ...] [--bcc <email> ...] [--attach <path> ...] [--is-html]`
+- Creates a draft in your Gmail account; it does not send the email.
+- Success output includes the draft id and a hint to review it in Gmail Drafts.
 
 Param file
 - `--param-file` is a JSON object; CLI flags override values from the file.

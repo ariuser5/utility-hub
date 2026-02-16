@@ -9,8 +9,10 @@ var credentialsOption = new Option<string?>(
 
 var authCommand = AuthCommandBuilder.Build(credentialsOption);
 var sendCommand = SendCommandBuilder.Build(credentialsOption);
+var draftCommand = DraftCommandBuilder.Build(credentialsOption);
 
 root.AddCommand(authCommand);
 root.AddCommand(sendCommand);
+root.AddCommand(draftCommand);
 
 return await root.InvokeAsync(args).ConfigureAwait(false);

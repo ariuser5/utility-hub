@@ -23,6 +23,7 @@ internal static class GmailBroker
 
         var tokenStore = new FileDataStore(MailerPaths.GetTokenStoreDirectory(), true);
         string[] scopes = [
+            GmailService.Scope.GmailCompose,
             GmailService.Scope.GmailSend,
             GmailService.Scope.GmailMetadata
         ];

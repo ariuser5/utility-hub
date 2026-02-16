@@ -1,15 +1,16 @@
 using System.CommandLine;
+
 namespace DCiuve.UtilityHub.Mailer.Commands;
 
-internal static class SendCommandBuilder
+internal static class DraftCommandBuilder
 {
     public static Command Build(Option<string?> credentialsOption)
     {
         return SendDraftCommandShared.Build(
-            commandName: "send",
-            description: "Send an email using Gmail.",
+            commandName: "draft",
+            description: "Create an email draft in Gmail.",
             credentialsOption,
-            includeDraftOption: true,
-            defaultDraftMode: false);
+            includeDraftOption: false,
+            defaultDraftMode: true);
     }
 }

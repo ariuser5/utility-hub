@@ -44,7 +44,14 @@ param(
     [int]$MaxDepth = 0,
 
     [Parameter()]
-    [string]$Title = 'Preview'
+    [string]$Title = 'Preview',
+
+    # Selection mode:
+    # - disabled: navigation only (default)
+    # - single: allows selecting one item and returns its full path
+    [Parameter()]
+    [ValidateSet('disabled', 'single')]
+    [string]$Selection = 'disabled'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -313,7 +320,13 @@ function Resolve-RelativeUnderRoot {
 }
 
 function Show-PreviewHelp {
-    Write-Host 'Navigation: Up/Down select, Right/Enter enter dir, Left/Backspace go back, r refresh, Esc cancel fetch (or quit), q quit' -ForegroundColor DarkCyan
+    param([Parameter()][string]$SelectionMode = 'disabled')
+    
+    if ($SelectionMode -eq 'single') {
+        Write-Host 'Navigation: Up/Down move, Right/Enter enter dir, Left/Backspace go back, Space mark/unmark, Enter(on marked) submit, r refresh, q quit' -ForegroundColor DarkCyan
+    } else {
+        Write-Host 'Navigation: Up/Down select, Right/Enter enter dir, Left/Backspace go back, r refresh, Esc cancel fetch (or quit), q quit' -ForegroundColor DarkCyan
+    }
 }
 
 function Get-CombinedEntries {
@@ -373,9 +386,17 @@ function Render-SelectorScreen {
         [Parameter()][int]$MaxDepth,
         [Parameter()][int]$Depth,
         [Parameter()][int]$SpinnerIndex = -1,
-        [Parameter()][int]$SpinnerDots = 0
+        [Parameter()][int]$SpinnerDots = 0,
+        [Parameter()][string]$SelectionMode = 'disabled',
+        [Parameter()][int]$MarkedIndex = -1
     )
 
+    Clear-Host
+
+    Write-Heading $TitleText
+    Write-Info "Backend: $BackendLabel"
+    Write-Info "Location: $LocationText"
+    Show-PreviewHelp -SelectionMode $SelectionMode
     Clear-Host
 
     Write-Heading $TitleText
@@ -414,10 +435,17 @@ function Render-SelectorScreen {
 
     for ($i = $offset; $i -lt $endExclusive; $i++) {
         $e = $Entries[$i]
-
-        $isSelected = ($i -eq $SelectedIndex)
+        $isMarked = ($SelectionMode -eq 'single' -and $i -eq $MarkedIndex)
+        
         $marker = ''
         $markerColor = 'DarkGray'
+        $prefix = ''
+        
+        # Add selection marker prefix if item is marked
+        if ($isMarked) {
+            $prefix = '[✓] '
+        }
+        
         if ($isSelected) {
             if ($SpinnerDots -gt 0 -and $i -eq $SpinnerIndex) {
                 $d = Clamp-Int -Value $SpinnerDots -Min 1 -Max 3
@@ -434,13 +462,17 @@ function Render-SelectorScreen {
 
         $entryColor = if ($e.IsDir) { 'Cyan' } else { 'Gray' }
         if ($isSelected) { $entryColor = 'White' }
+        if ($isMarked -and -not $isSelected) { $entryColor = 'Yellow' }
 
         $maxEntryWidth = $windowWidth
-        if ($isSelected -and $marker) {
+        if ($marker) {
             $maxEntryWidth = [Math]::Max(1, $windowWidth - $marker.Length)
         }
+        if ($prefix) {
+            $maxEntryWidth = [Math]::Max(1, $maxEntryWidth - $prefix.Length)
+        }
 
-        $displayText = Truncate-Text -Text ([string]$e.Display) -MaxWidth $maxEntryWidth
+        $displayText = $prefix + (Truncate-Text -Text ([string]$e.Display) -MaxWidth $maxEntryWidth)
 
         if ($isSelected -and $marker) {
             Write-Host $displayText -NoNewline -ForegroundColor $entryColor -BackgroundColor $selectedBg
@@ -470,7 +502,9 @@ function Wait-RcloneJobWithInlineSpinner {
         [Parameter(Mandatory = $true)][int]$SelectedIndex,
         [Parameter(Mandatory = $true)][int]$ScrollOffset,
         [Parameter()][int]$MaxDepth,
-        [Parameter()][int]$Depth
+        [Parameter()][int]$Depth,
+        [Parameter()][string]$SelectionMode = 'disabled',
+        [Parameter()][int]$MarkedIndex = -1
     )
 
     $dots = 1
@@ -492,7 +526,7 @@ function Wait-RcloneJobWithInlineSpinner {
         }
 
         $spinnerIdx = if ($Entries -and $Entries.Count -gt 0) { $SelectedIndex } else { -1 }
-        Render-SelectorScreen -TitleText $TitleText -BackendLabel $BackendLabel -LocationText $LocationText -Entries $Entries -SelectedIndex $SelectedIndex -ScrollOffset $ScrollOffset -MaxDepth $MaxDepth -Depth $Depth -SpinnerIndex $spinnerIdx -SpinnerDots $dots
+        Render-SelectorScreen -TitleText $TitleText -BackendLabel $BackendLabel -LocationText $LocationText -Entries $Entries -SelectedIndex $SelectedIndex -ScrollOffset $ScrollOffset -MaxDepth $MaxDepth -Depth $Depth -SpinnerIndex $spinnerIdx -SpinnerDots $dots -SelectionMode $SelectionMode -MarkedIndex $MarkedIndex
         Start-Sleep -Milliseconds 180
         $dots = ($dots % 3) + 1
     }
@@ -510,18 +544,19 @@ function Invoke-RcloneLsfWithInlineSpinner {
         [Parameter(Mandatory = $true)][int]$SelectedIndex,
         [Parameter(Mandatory = $true)][int]$ScrollOffset,
         [Parameter()][int]$MaxDepth,
-        [Parameter()][int]$Depth
+        [Parameter()][int]$Depth,
+        [Parameter()][string]$SelectionMode = 'disabled',
+        [Parameter()][int]$MarkedIndex = -1
     )
 
     $job = Start-Job -ScriptBlock {
         param($spec)
         & rclone lsf $spec --format p 2>$null
     } -ArgumentList $RemoteSpec
-
     $lines = @()
     $completed = $false
     try {
-        $completed = Wait-RcloneJobWithInlineSpinner -Job $job -TitleText $TitleText -BackendLabel $BackendLabel -LocationText $LocationText -Entries $Entries -SelectedIndex $SelectedIndex -ScrollOffset $ScrollOffset -MaxDepth $MaxDepth -Depth $Depth
+        $completed = Wait-RcloneJobWithInlineSpinner -Job $job -TitleText $TitleText -BackendLabel $BackendLabel -LocationText $LocationText -Entries $Entries -SelectedIndex $SelectedIndex -ScrollOffset $ScrollOffset -MaxDepth $MaxDepth -Depth $Depth -SelectionMode $SelectionMode -MarkedIndex $MarkedIndex
         if ($completed) {
             $received = Receive-Job -Job $job -ErrorAction Stop
             if ($received) { $lines = @($received) }
@@ -690,6 +725,10 @@ $relative = ''
 $dirCache = [System.Collections.Generic.Dictionary[string, object]]::new()
 $forceRefresh = $false
 
+# Track marked item for selection mode
+$script:__markedIndex = -1
+$script:__markedLocation = $null
+
 while ($true) {
     try {
         $backendLabel = Get-BackendLabel -Nav $nav -Remote ($rclone.Remote)
@@ -730,13 +769,12 @@ while ($true) {
                     $pathPart = Join-Relative -Base $pathPart -Child $relative
                 }
                 $pathPart = ConvertTo-RclonePath -Path $pathPart
-
                 $remoteSpec = if ($pathPart) { ('{0}:{1}' -f $rclone.Remote, $pathPart) } else { ('{0}:' -f $rclone.Remote) }
                 $locationText = $remoteSpec
                 $depth = (Get-RelSegments -Rel $relative).Count
 
                 # rclone listing (single call). If this is a cache miss, we fetch synchronously here.
-                $fetch = Invoke-RcloneLsfWithInlineSpinner -RemoteSpec $remoteSpec -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth
+                $fetch = Invoke-RcloneLsfWithInlineSpinner -RemoteSpec $remoteSpec -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth -SelectionMode $Selection -MarkedIndex $script:__markedIndex
                 if (-not $fetch.Completed) {
                     # Canceled: keep view as-is (entries stays empty for this cache miss).
                     $entries = @()
@@ -767,17 +805,73 @@ while ($true) {
         $reserved = 7
         $visible = [Math]::Max(3, $windowHeight - $reserved)
         $maxOffset = [Math]::Max(0, $entries.Count - $visible)
+
+        # Check if marked item is still valid at this location
+        $currentLocation = $cacheKey
+        if ($script:__markedLocation -ne $currentLocation) {
+            $script:__markedIndex = -1
+            $script:__markedLocation = $null
+        }
+
         if ($script:__selectedIndex -lt $script:__scrollOffset) { $script:__scrollOffset = $script:__selectedIndex }
         if ($script:__selectedIndex -ge ($script:__scrollOffset + $visible)) { $script:__scrollOffset = $script:__selectedIndex - $visible + 1 }
         $script:__scrollOffset = Clamp-Int -Value $script:__scrollOffset -Min 0 -Max $maxOffset
 
-        Render-SelectorScreen -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth
+        Render-SelectorScreen -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth -SelectionMode $Selection -MarkedIndex $script:__markedIndex
 
         # Read a single key.
         $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
         $vk = [int]$key.VirtualKeyCode
         if ($vk -eq 27 -or ($key.Character -and ($key.Character -eq 'q' -or $key.Character -eq 'Q'))) {
             break
+        }
+
+        # Handle Space bar - toggle mark/unmark in selection mode
+        if ($vk -eq 32 -and $Selection -eq 'single') {
+            if ($entries -and $entries.Count -gt 0) {
+                $selected = $entries[$script:__selectedIndex]
+                # Don't allow marking the parent directory
+                if (-not ($selected.IsDir -and $selected.Name -eq '..')) {
+                    if ($script:__markedIndex -eq $script:__selectedIndex) {
+                        # Unmark
+                        $script:__markedIndex = -1
+                        $script:__markedLocation = $null
+                    } else {
+                        # Mark this item
+                        $script:__markedIndex = $script:__selectedIndex
+                        $script:__markedLocation = $currentLocation
+                    }
+                }
+            }
+            continue
+        }
+
+        # Handle Enter on marked item - submit selection
+        if ($vk -eq 13 -and $Selection -eq 'single' -and $script:__markedIndex -ge 0 -and $script:__markedIndex -lt $entries.Count) {
+            $selected = $entries[$script:__markedIndex]
+
+            # Build full path
+            $fullPath = ''
+            if ($nav -eq 'filesystem') {
+                $currentFull = $rootFull
+                if ($relative) {
+                    foreach ($seg in (Get-RelSegments -Rel $relative)) {
+                        $currentFull = Join-Path $currentFull $seg
+                    }
+                }
+                $fullPath = Join-Path $currentFull $selected.Name
+            } else {
+                $pathPart = $rclone.RootPath
+                if ($relative) {
+                    $pathPart = Join-Relative -Base $pathPart -Child $relative
+                }
+                $pathPart = Join-Relative -Base $pathPart -Child $selected.Name
+                $pathPart = ConvertTo-RclonePath -Path $pathPart
+                $fullPath = if ($pathPart) { ('{0}:{1}' -f $rclone.Remote, $pathPart) } else { ('{0}:' -f $rclone.Remote) }
+            }
+
+            Write-Output $fullPath
+            return
         }
 
         if ($key.Character -and ($key.Character -eq 'r' -or $key.Character -eq 'R')) {
@@ -790,7 +884,7 @@ while ($true) {
                 $pathPart = ConvertTo-RclonePath -Path $pathPart
                 $remoteSpec = if ($pathPart) { ('{0}:{1}' -f $rclone.Remote, $pathPart) } else { ('{0}:' -f $rclone.Remote) }
 
-                $fetch = Invoke-RcloneLsfWithInlineSpinner -RemoteSpec $remoteSpec -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth
+                $fetch = Invoke-RcloneLsfWithInlineSpinner -RemoteSpec $remoteSpec -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth -SelectionMode $Selection -MarkedIndex $script:__markedIndex
                 if ($fetch.Completed) {
                     $newEntries = Convert-RcloneLsfLinesToEntries -Lines $fetch.Lines -IncludeParent ($relative -ne '')
                     $dirCache[$cacheKey] = [pscustomobject]@{ LocationText = $locationText; Entries = $newEntries; Depth = $depth }
@@ -828,7 +922,7 @@ while ($true) {
                         $targetSpec = if ($targetPath) { ('{0}:{1}' -f $rclone.Remote, $targetPath) } else { ('{0}:' -f $rclone.Remote) }
                         $targetDepth = (Get-RelSegments -Rel $targetRel).Count
 
-                        $fetch = Invoke-RcloneLsfWithInlineSpinner -RemoteSpec $targetSpec -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth
+                        $fetch = Invoke-RcloneLsfWithInlineSpinner -RemoteSpec $targetSpec -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth -SelectionMode $Selection -MarkedIndex $script:__markedIndex
                         if (-not $fetch.Completed) {
                             # Canceled: don't navigate.
                             continue
@@ -843,6 +937,9 @@ while ($true) {
             }
             $script:__selectedIndex = 0
             $script:__scrollOffset = 0
+            # Clear marked item when navigating
+            $script:__markedIndex = -1
+            $script:__markedLocation = $null
             continue
         }
 
@@ -866,7 +963,7 @@ while ($true) {
                             $targetSpec = if ($targetPath) { ('{0}:{1}' -f $rclone.Remote, $targetPath) } else { ('{0}:' -f $rclone.Remote) }
                             $targetDepth = (Get-RelSegments -Rel $targetRel).Count
 
-                            $fetch = Invoke-RcloneLsfWithInlineSpinner -RemoteSpec $targetSpec -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth
+                            $fetch = Invoke-RcloneLsfWithInlineSpinner -RemoteSpec $targetSpec -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth -SelectionMode $Selection -MarkedIndex $script:__markedIndex
                             if (-not $fetch.Completed) {
                                 # Canceled: don't navigate.
                                 continue
@@ -881,6 +978,9 @@ while ($true) {
                 }
                 $script:__selectedIndex = 0
                 $script:__scrollOffset = 0
+                # Clear marked item when navigating
+                $script:__markedIndex = -1
+                $script:__markedLocation = $null
                 continue
             }
 
@@ -908,7 +1008,7 @@ while ($true) {
                     $targetSpec = if ($targetPath) { ('{0}:{1}' -f $rclone.Remote, $targetPath) } else { ('{0}:' -f $rclone.Remote) }
                     $targetDepth = (Get-RelSegments -Rel $targetRel).Count
 
-                    $fetch = Invoke-RcloneLsfWithInlineSpinner -RemoteSpec $targetSpec -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth
+                    $fetch = Invoke-RcloneLsfWithInlineSpinner -RemoteSpec $targetSpec -TitleText $Title -BackendLabel $backendLabel -LocationText $locationText -Entries $entries -SelectedIndex $script:__selectedIndex -ScrollOffset $script:__scrollOffset -MaxDepth $MaxDepth -Depth $depth -SelectionMode $Selection -MarkedIndex $script:__markedIndex
                     if (-not $fetch.Completed) {
                         # Canceled: don't navigate.
                         continue
@@ -922,6 +1022,9 @@ while ($true) {
             $relative = $targetRel
             $script:__selectedIndex = 0
             $script:__scrollOffset = 0
+            # Clear marked item when navigating
+            $script:__markedIndex = -1
+            $script:__markedLocation = $null
             continue
         }
 
