@@ -20,29 +20,9 @@ Notes:
 param(
     # Optional JSON config file.
     # If not provided, defaults to: %LOCALAPPDATA%\utility-hub\data\contacts-data.json (if it exists).
-    # Precedence rules:
-    #   - If -StaticDataFile is NOT provided: CLI parameters override config values.
-    #   - If -StaticDataFile IS provided: values are merged (for Clients, entries are combined; CLI wins on duplicate aliases).
     [Parameter()]
     [Alias('ConfigPath')]
-    [string]$StaticDataFile,
-
-    # Root folder for accountant.
-    # Can be a filesystem path (e.g., C:\Data\entity\accountant) or an rclone remote spec (e.g., gdrive:accountant).
-    [Parameter()]
-    [string]$AccountantRoot,
-
-    # Client roots. Provide one or more entries.
-    #
-    # Accepted forms:
-    #   - Hashtable/dictionary: @{ Client1 = 'C:\path'; Client2 = 'gdrive:clients/foo' }
-    #   - String array entries:
-    #       - 'Alias=C:\path with spaces'
-    #       - 'Alias=gdrive:clients/foo'
-    #       - 'C:\some\client'  (alias auto-derived from last segment)
-    #       - 'gdrive:clients/foo' (alias auto-derived)
-    [Parameter()]
-    [object]$Clients
+    [string]$StaticDataFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,7 +34,7 @@ $ErrorActionPreference = 'Stop'
 $entityConfigModule = Join-Path $PSScriptRoot '.\helpers\EntityConfig.psm1'
 Import-Module $entityConfigModule -Force
 
-$init = Initialize-EntityConfig -StaticDataFile $StaticDataFile -AccountantRoot $AccountantRoot -Clients $Clients -BoundParameters $PSBoundParameters
+$init = Initialize-EntityConfig -StaticDataFile $StaticDataFile -BoundParameters $PSBoundParameters
 $Config = $init.Config
 $defaultStaticDataFile = $init.DefaultStaticDataFile
 $resolvedStaticDataFile = $init.ResolvedStaticDataFile
@@ -209,7 +189,7 @@ function Browse-Clients {
 function Preview-Accountant {
     $root = ($Config.AccountantRoot ?? '').Trim()
     if (-not $root) {
-        throw 'AccountantRoot is not configured. Pass -AccountantRoot or set Config.AccountantRoot.'
+        throw 'AccountantRoot is not configured. Set Config.AccountantRoot in static data.'
     }
 
     Start-Preview -Root $root -Title 'Accountant preview'
@@ -333,7 +313,6 @@ function Show-Settings {
             Write-Info "Static data file: (none loaded) - set LOCALAPPDATA or pass -StaticDataFile"
         }
     }
-    Write-Info 'CLI parameters override by default; when -StaticDataFile is provided, Clients are merged.'
     Write-Host ''
     Read-Host 'Press Enter to go back'
 }

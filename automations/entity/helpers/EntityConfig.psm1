@@ -7,7 +7,6 @@ Shared static-data/config helpers for entity automations.
 Responsibilities:
   - Discover default static data file path
   - Parse/merge JSON config into defaults
-  - Apply CLI override/merge rules
   - Normalize and resolve client entries (aliases + roots)
 
 Exported functions:
@@ -116,93 +115,6 @@ function Get-AliasFromPath {
     return $leaf
 }
 
-function ConvertTo-ClientMap {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][AllowNull()]$ClientsValue
-    )
-
-    $map = [ordered]@{}
-    if ($null -eq $ClientsValue) { return $map }
-
-    if ($ClientsValue -is [System.Collections.IDictionary]) {
-        foreach ($k in $ClientsValue.Keys) {
-            $name = ($k ?? '').ToString().Trim()
-            $root = ($ClientsValue[$k] ?? '').ToString().Trim()
-            if (-not $root) { continue }
-            if (-not $name) { $name = Get-AliasFromPath -Path $root }
-            if (-not $name) { continue }
-            $map[$name] = $root
-        }
-        return $map
-    }
-
-    # JSON object becomes PSCustomObject (properties -> values)
-    if ($ClientsValue -is [pscustomobject]) {
-        foreach ($p in $ClientsValue.PSObject.Properties) {
-            $name = ($p.Name ?? '').ToString().Trim()
-            $root = ($p.Value ?? '').ToString().Trim()
-            if (-not $root) { continue }
-            if (-not $name) { $name = Get-AliasFromPath -Path $root }
-            if (-not $name) { continue }
-            $map[$name] = $root
-        }
-        if ($map.Count -gt 0) { return $map }
-        # If it wasn't a client object, fall through and treat as list.
-    }
-
-    $entries = @()
-    if ($ClientsValue -is [string]) {
-        $entries = @($ClientsValue)
-    } elseif ($ClientsValue -is [object[]]) {
-        $entries = @($ClientsValue)
-    } else {
-        $entries = @($ClientsValue)
-    }
-
-    foreach ($entry in $entries) {
-        if ($null -eq $entry) { continue }
-        $s = $entry.ToString().Trim()
-        if (-not $s) { continue }
-
-        $name = ''
-        $root = ''
-
-        $eqIdx = $s.IndexOf('=')
-        if ($eqIdx -gt 0) {
-            $name = $s.Substring(0, $eqIdx).Trim()
-            $root = $s.Substring($eqIdx + 1).Trim()
-        } else {
-            $root = $s
-            $name = Get-AliasFromPath -Path $root
-        }
-
-        if (-not $root) { continue }
-        if (-not $name) { $name = Get-AliasFromPath -Path $root }
-        if (-not $name) { continue }
-
-        $map[$name] = $root
-    }
-
-    return $map
-}
-
-function Merge-Clients {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][AllowNull()]$BaseClients,
-        [Parameter(Mandatory = $true)][AllowNull()]$OverlayClients
-    )
-
-    $baseMap = ConvertTo-ClientMap -ClientsValue $BaseClients
-    $overlayMap = ConvertTo-ClientMap -ClientsValue $OverlayClients
-
-    $merged = [ordered]@{}
-    foreach ($k in $baseMap.Keys) { $merged[$k] = $baseMap[$k] }
-    foreach ($k in $overlayMap.Keys) { $merged[$k] = $overlayMap[$k] }
-    return $merged
-}
-
 function Resolve-Clients {
     [CmdletBinding()]
     param(
@@ -287,14 +199,12 @@ function Initialize-EntityConfig {
     [CmdletBinding()]
     param(
         [Parameter()][string]$StaticDataFile,
-        [Parameter()][string]$AccountantRoot,
-        [Parameter()][object]$Clients,
         [Parameter(Mandatory = $true)][hashtable]$BoundParameters
     )
 
     $config = New-EntityConfig
 
-    # Load config from JSON (if provided, or if default exists), then apply CLI overrides/merges.
+    # Load config from JSON (if provided, or if default exists).
     $defaultStaticDataFile = Get-DefaultEntityStaticDataFile
 
     $resolvedStaticDataFile = $null
@@ -309,23 +219,6 @@ function Initialize-EntityConfig {
         $resolvedStaticDataFilePath = (Resolve-Path -LiteralPath $resolvedStaticDataFile -ErrorAction Stop).Path
         $jsonConfig = Import-EntityConfigJson -Path $resolvedStaticDataFilePath
         Merge-EntityConfig -Target $config -Source $jsonConfig
-    }
-
-    $staticDataFileExplicit = $BoundParameters.ContainsKey('StaticDataFile')
-
-    if ($BoundParameters.ContainsKey('AccountantRoot')) {
-        # AccountantRoot is scalar: CLI always wins when provided.
-        $config.AccountantRoot = $AccountantRoot
-    }
-
-    if ($BoundParameters.ContainsKey('Clients')) {
-        if ($staticDataFileExplicit -and $resolvedStaticDataFilePath) {
-            # Explicit config path: merge client entries.
-            $config.Clients = Merge-Clients -BaseClients $config.Clients -OverlayClients $Clients
-        } else {
-            # No explicit config path: CLI overrides config.
-            $config.Clients = $Clients
-        }
     }
 
     return [pscustomobject]@{
