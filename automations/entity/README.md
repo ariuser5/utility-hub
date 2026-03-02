@@ -46,6 +46,34 @@ Examples (PowerShell):
 
 Use [App-Main.ps1](automations/entity/App-Main.ps1) as the interactive entrypoint for browsing client/accountant folders (read-only) and jumping into pipelines.
 
+Automation menu source:
+
+- `App-Main.ps1` reads commands from JSON config files (no script auto-discovery).
+- Public config (tracked in repo): `automations/entity/automations.json`
+- Private config (local-only): `%APPDATA%\utility-hub\automations\automations.json`
+- Merge rule: private entries override public ones when `alias` matches (case-insensitive).
+
+Automation config schema:
+
+- Preferred: object with `automations` array
+- Also supported: top-level array
+- Each item requires:
+	- `alias`: string
+	- `command`: string (PowerShell command executed by `pwsh -Command`)
+
+Example:
+
+```json
+{
+	"automations": [
+		{
+			"alias": "label-files",
+			"command": "& (Join-Path $env:APP_DIR 'scripts/Label-Files.ps1')"
+		}
+	]
+}
+```
+
 Examples:
 
 - Default (loads static data from `%LOCALAPPDATA%\utility-hub\data\contacts-data.json` if it exists):

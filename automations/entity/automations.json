@@ -1,0 +1,8 @@
+{
+  "automations": [
+    {
+      "alias": "sample-automation",
+      "command": "& (Join-Path $PSScriptRoot 'automation-scripts/Z_Example-Automation.ps1')"
+    }
+  ]
+}

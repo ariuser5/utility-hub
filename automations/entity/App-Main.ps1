@@ -7,7 +7,7 @@ Interactive entrypoint for entity automations.
 Goals:
     - Read-only navigation/preview of folder structures (interactive, folder-only navigation)
   - Works against local filesystem OR Google Drive via rclone
-    - Provides lightweight “automation launcher” placeholders (open or print command)
+    - Launches automations from JSON command configs
 
 Notes:
   - This script intentionally does NOT implement workflow logic (month close, labels,
@@ -33,6 +33,9 @@ $ErrorActionPreference = 'Stop'
 
 $entityConfigModule = Join-Path $PSScriptRoot '.\helpers\EntityConfig.psm1'
 Import-Module $entityConfigModule -Force
+
+$automationConfigModule = Join-Path $PSScriptRoot '.\helpers\AutomationConfig.psm1'
+Import-Module $automationConfigModule -Force
 
 $init = Initialize-EntityConfig -StaticDataFile $StaticDataFile -BoundParameters $PSBoundParameters
 $Config = $init.Config
@@ -195,60 +198,11 @@ function Preview-Accountant {
     Start-Preview -Root $root -Title 'Accountant preview'
 }
 
-function Get-AutomationScripts {
-    $allFiles = @()
-
-    # 1. Built-in automations (relative to this script)
-    $builtInDir = Join-Path $PSScriptRoot '.\automation-scripts'
-    if (Test-Path -LiteralPath $builtInDir -PathType Container) {
-        $builtInFiles = @(Get-ChildItem -LiteralPath $builtInDir -File -Filter '*.ps1' -ErrorAction SilentlyContinue)
-        if ($builtInFiles -and $builtInFiles.Count -gt 0) {
-            $allFiles += $builtInFiles
-        }
-    }
-
-    # 2. User automations (LOCALAPPDATA)
-    if ($env:LOCALAPPDATA) {
-        $userDir = Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'utility-hub') 'automations') 'automation-scripts'
-        if (Test-Path -LiteralPath $userDir -PathType Container) {
-            $userFiles = @(Get-ChildItem -LiteralPath $userDir -File -Filter '*.ps1' -ErrorAction SilentlyContinue)
-            if ($userFiles -and $userFiles.Count -gt 0) {
-                $allFiles += $userFiles
-            }
-        }
-    }
-
-    # 3. Custom user-defined location (via environment variable)
-    if ($env:AUTOMATION_SCRIPTS_PATH) {
-        $customDir = $env:AUTOMATION_SCRIPTS_PATH.Trim()
-        if ($customDir -and (Test-Path -LiteralPath $customDir -PathType Container)) {
-            $customFiles = @(Get-ChildItem -LiteralPath $customDir -File -Filter '*.ps1' -ErrorAction SilentlyContinue)
-            if ($customFiles -and $customFiles.Count -gt 0) {
-                $allFiles += $customFiles
-            }
-        }
-    }
-
-    if ($allFiles.Count -eq 0) {
-        return @()
-    }
-
-    return $allFiles |
-        Sort-Object Name |
-        ForEach-Object {
-            [pscustomobject]@{
-                Name     = $_.Name
-                FullPath = $_.FullName
-            }
-        }
-}
-
 function Run-Automation {
-    param([Parameter(Mandatory = $true)][string]$AutomationPath)
-
-    if (-not (Test-Path -LiteralPath $AutomationPath -PathType Leaf)) {
-        throw "Automation not found: $AutomationPath"
-    }
+    param(
+        [Parameter(Mandatory = $true)][string]$Alias,
+        [Parameter(Mandatory = $true)][string]$Command
+    )
 
     # Set environment variables for automations
     $utilityHubRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -256,8 +210,11 @@ function Run-Automation {
     $env:APP_DIR = $PSScriptRoot
 
     Write-Host ''
-    & pwsh -NoProfile -ExecutionPolicy Bypass -File $AutomationPath
-    $exitCode = $LASTEXITCODE
+    Write-Info "Running automation '$Alias'"
+    Write-Info "Command: $Command"
+    Write-Host ''
+
+    $exitCode = Invoke-AutomationCommand -Alias $Alias -Command $Command -AppRoot $PSScriptRoot
 
     Write-Host ''
     Write-Info "Automation finished (exit code: $exitCode)"
@@ -272,18 +229,24 @@ function Automations-Menu {
         Write-Info 'Available automations.'
         Write-Host ''
 
-        $automations = @(Get-AutomationScripts)
+        $automations = @(Get-Automations -AppRoot $PSScriptRoot)
         if (-not $automations -or $automations.Count -eq 0) {
             Write-Warn 'No automations found.'
+            $paths = Get-AutomationConfigPaths -AppRoot $PSScriptRoot
+            Write-Info "Expected config files:"
+            Write-Info "- $($paths.Public)"
+            if ($paths.Private) {
+                Write-Info "- $($paths.Private)"
+            }
             Write-Host ''
             Read-Host 'Press Enter to go back'
             return
         }
 
         $automation = Select-FromList -Title 'Select automation' -Items $automations -ItemLabel 'automations' -AllowQuit
-        if ($null -eq $automation -or -not $automation.FullPath) { return }
+        if ($null -eq $automation -or -not $automation.Command) { return }
 
-        Run-Automation -AutomationPath $automation.FullPath
+        Run-Automation -Alias $automation.Alias -Command $automation.Command
     }
 }
 
@@ -302,6 +265,18 @@ function Show-Settings {
             Write-Host ("- {0} -> {1}" -f $c.Name, $c.Root) -ForegroundColor Gray
         }
     }
+
+    Write-Host ''
+    $automationConfigPaths = Get-AutomationConfigPaths -AppRoot $PSScriptRoot
+    Write-Info "Automation config (public): $($automationConfigPaths.Public)"
+    if ($automationConfigPaths.Private) {
+        Write-Info "Automation config (private): $($automationConfigPaths.Private)"
+    } else {
+        Write-Info 'Automation config (private): APPDATA is not set.'
+    }
+
+    $automationCount = (Get-Automations -AppRoot $PSScriptRoot).Count
+    Write-Info "Configured automations: $automationCount"
 
     Write-Host ''
     if ($resolvedStaticDataFile) {
