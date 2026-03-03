@@ -104,7 +104,7 @@ Navigation preview controls (in the preview window):
 - Left/Backspace: go up
 - `q` or Esc: quit preview
 
-Implementation: the preview UI is shared and lives in [automations/utils/Preview.ps1](automations/utils/Preview.ps1).
+Implementation: the preview UI is shared and lives in [automations/utils/Preview-Location.ps1](automations/utils/Preview-Location.ps1).
 
 ## Scripts
 

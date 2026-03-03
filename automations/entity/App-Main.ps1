@@ -12,7 +12,7 @@ Goals:
 Notes:
   - This script intentionally does NOT implement workflow logic (month close, labels,
     archival, emailing, etc). It only helps you explore and jump into existing tools.
-    - The navigation preview UI is implemented by: automations/utils/Preview.ps1
+    - The navigation preview UI is implemented by: automations/utils/Preview-Location.ps1
 -------------------------------------------------------------------------------
 #>
 
@@ -90,7 +90,7 @@ function Start-Preview {
         [Parameter(Mandatory = $true)][string]$Title
     )
 
-    $previewScript = Join-Path $PSScriptRoot '..\utils\Preview.ps1'
+    $previewScript = Join-Path $PSScriptRoot '..\utils\Preview-Location.ps1'
     $previewScript = (Resolve-Path -LiteralPath $previewScript -ErrorAction Stop).Path
 
     $previewRoot = ($Root ?? '').Trim()

@@ -43,11 +43,10 @@ $ErrorActionPreference = "Stop"
 # Month short names mapping in order (jan..dec)
 $months = @("jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec")
 
-$pathModule = Join-Path $PSScriptRoot '..\..\utils\Path.psm1'
+$pathModule = Join-Path $PSScriptRoot '..\..\utils\PathUtil.psm1'
 Import-Module $pathModule -Force
 
-$monthPatternModule = Join-Path $PSScriptRoot '..\helpers\MonthPattern.psm1'
-Import-Module $monthPatternModule -Force
+$lastMonthScript = Join-Path $PSScriptRoot '..\..\utils\Get-LastMonth.ps1'
 
 $baseInfo = $null
 $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
@@ -90,9 +89,9 @@ while ($true) {
     # Filter directories for the current year
     $yearDirs = @($existingDirs | Where-Object { $_ -match "^_*[a-z]{3}-$currentYear$" })
     
-    # Get the latest month for this year using the MonthPattern module
+    # Get the latest month for this year
     $latestMonth = if ($yearDirs.Count -gt 0) {
-        Get-LatestMonthPattern -Values $yearDirs -SkipInvalid $true
+        & $lastMonthScript -Values $yearDirs -SkipInvalid $true
     } else {
         $null
     }
