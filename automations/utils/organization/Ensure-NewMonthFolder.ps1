@@ -1,12 +1,12 @@
 
 # -----------------------------------------------------------------------------
-# Ensure-MonthFolder.ps1
+# Ensure-NewMonthFolder.ps1
 # -----------------------------------------------------------------------------
 # Creates the next missing month folder (with prefix) in a directory.
 # Supports both local filesystem paths and rclone remote specs.
 #
 # Usage:
-#   .\Ensure-MonthFolder.ps1 -Path "gdrive:path/to/dir" [-PathType Auto|Local|Remote] [-StartYear 2025] [-NewFolderPrefix "_"]
+#   .\Ensure-NewMonthFolder.ps1 -Path "gdrive:path/to/dir" [-PathType Auto|Local|Remote] [-StartYear 2025] [-NewFolderPrefix "_"]
 #
 # Parameters:
 #   -Path              Base folder where month folders live (local path or rclone remote spec)
@@ -19,7 +19,8 @@
 #   - Finds the latest existing month for each year, starting from StartYear
 #   - If all months exist for a year, continues to the next year
 #   - Creates the next missing month folder with the specified prefix
-#   - Outputs CREATED:<path> if a folder is created, or NOOP if all months exist
+#   - Writes status to host/information streams
+#   - Emits a single structured result object on the output stream
 # -----------------------------------------------------------------------------
 [CmdletBinding()]
 param(
@@ -43,10 +44,10 @@ $ErrorActionPreference = "Stop"
 # Month short names mapping in order (jan..dec)
 $months = @("jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec")
 
-$pathModule = Join-Path $PSScriptRoot '..\..\utils\PathUtil.psm1'
+$pathModule = Join-Path $PSScriptRoot '..\PathUtil.psm1'
 Import-Module $pathModule -Force
 
-$lastMonthScript = Join-Path $PSScriptRoot '..\..\utils\Get-LastMonth.ps1'
+$lastMonthScript = Join-Path $PSScriptRoot '.\Get-LastMonth.ps1'
 
 $baseInfo = $null
 $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
@@ -138,5 +139,9 @@ if ($baseInfo.PathType -eq 'Remote') {
 
 Write-Host "✓ Created folder: $newFolderName" -ForegroundColor Green
 Write-Host "  Path: $targetPath" -ForegroundColor Gray
-Write-Output "CREATED:$targetPath"
+Write-Output ([pscustomobject]@{
+    Status = 'Created'
+    Path = $targetPath
+    FolderName = $newFolderName
+})
 exit 0

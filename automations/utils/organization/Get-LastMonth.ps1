@@ -20,18 +20,19 @@ param(
     [switch]$SkipInvalid
 )
 
-$months = @("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+$patternsModule = Join-Path $PSScriptRoot 'Patterns.psm1'
+Import-Module $patternsModule -Force
 
 $monthItems = @()
 foreach ($value in $Values) {
     $cleanValue = ($value ?? '').ToString().TrimEnd('/')
 
-    if ($cleanValue -match '^(_*)([a-z]{3})-(\d{4})$') {
+    if ($cleanValue -match $MonthPattern) {
         $prefix = $matches[1]
         $monthName = $matches[2]
         $year = [int]$matches[3]
 
-        $monthIdx = $months.IndexOf($monthName.ToLower())
+        $monthIdx = $MonthNames.IndexOf($monthName.ToLower())
         if ($monthIdx -ge 0) {
             $monthItems += [PSCustomObject]@{
                 Value = $cleanValue

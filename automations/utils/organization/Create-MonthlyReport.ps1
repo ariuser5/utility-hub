@@ -1,11 +1,11 @@
 <#
 -------------------------------------------------------------------------------
-New-ClientMonthlyReport.ps1
+Create-MonthlyReport.ps1
 -------------------------------------------------------------------------------
 Orchestrates the creation of a new monthly report folder on Google Drive and copies template files into it.
 
 Usage:
-    .\New-ClientMonthlyReport.ps1 -Path "gdrive:path/to/dir" [-PathType Auto|Local|Remote] [-StartYear 2025] [-NewFolderPrefix "_"]
+    .\Create-MonthlyReport.ps1 -Path "gdrive:path/to/dir" [-PathType Auto|Local|Remote] [-StartYear 2025] [-NewFolderPrefix "_"]
 
 Parameters:
     -Path              Base folder where month folders live (local path or rclone remote spec)
@@ -14,7 +14,7 @@ Parameters:
     -NewFolderPrefix   Prefix for new folders (default: "_")
 
 Behavior:
-    - Calls Ensure-MonthFolder.ps1 to create the next missing month folder (with prefix)
+    - Calls Ensure-NewMonthFolder.ps1 to create the next missing month folder (with prefix)
     - If a folder is created, calls Copy-ToMonthFolder.ps1 to copy template files into it
     - Template files are sourced from resources/monthly_report_template/
     - Prints progress and summary output
@@ -40,18 +40,18 @@ $ErrorActionPreference = "Stop"
 
 # Paths
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ensureScriptPath = Join-Path $scriptDir "..\scripts\Ensure-MonthFolder.ps1"
-$copyScriptPath = Join-Path $scriptDir "..\scripts\Copy-ToMonthFolder.ps1"
-$templateFolder = Join-Path $scriptDir "..\resources\monthly_report_template"
+$ensureScriptPath = Join-Path $scriptDir ".\Ensure-NewMonthFolder.ps1"
+$copyScriptPath = Join-Path $scriptDir ".\Copy-ToMonthFolder.ps1"
+$templateFolder = Join-Path $scriptDir "..\..\entity\resources\monthly_report_template"
 
-$pathModule = Join-Path $scriptDir "..\..\utils\PathUtil.psm1"
+$pathModule = Join-Path $scriptDir "..\PathUtil.psm1"
 Import-Module $pathModule -Force
 
 $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
 
 # Validate scripts exist
 if (-not (Test-Path $ensureScriptPath)) {
-    Write-Error "Ensure-MonthFolder.ps1 not found at: $ensureScriptPath"
+    Write-Error "Ensure-NewMonthFolder.ps1 not found at: $ensureScriptPath"
     exit 1
 }
 
@@ -81,14 +81,24 @@ try {
     
     $exitCode = $LASTEXITCODE
 } catch {
-    Write-Error "Failed to run Ensure-MonthFolder.ps1: $_"
+    Write-Error "Failed to run Ensure-NewMonthFolder.ps1: $_"
     exit 1
 }
 
-# Parse output
+# Parse output (structured object preferred; legacy string supported)
 $createdPath = $null
-foreach ($line in $ensureOutput) {
-    if ($line -match '^CREATED:(.+)$') {
+foreach ($item in @($ensureOutput)) {
+    if ($item -is [pscustomobject]) {
+        if ($item.PSObject.Properties.Match('Status').Count -gt 0 -and
+            $item.PSObject.Properties.Match('Path').Count -gt 0 -and
+            "$($item.Status)" -eq 'Created') {
+            $createdPath = "$($item.Path)"
+            break
+        }
+        continue
+    }
+
+    if ("$item" -match '^CREATED:(.+)$') {
         $createdPath = $Matches[1]
         break
     }
@@ -96,7 +106,7 @@ foreach ($line in $ensureOutput) {
 
 if ($exitCode -ne 0 -or $null -eq $createdPath) {
     Write-Host ""
-    Write-Host "No new folder was created. Output from Ensure-MonthFolder.ps1:" -ForegroundColor Yellow
+    Write-Host "No new folder was created. Output from Ensure-NewMonthFolder.ps1:" -ForegroundColor Yellow
     $ensureOutput | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
     Write-Host ""
     Write-Host "Exiting without copying files." -ForegroundColor Yellow
@@ -109,7 +119,7 @@ Write-Host ""
 # Step 2: Copy template files to the new folder
 Write-Host "[2/2] Copying template files to new folder..." -ForegroundColor Yellow
 try {
-    $copyOutput = & $copyScriptPath `
+    $null = & $copyScriptPath `
         -SourcePath $templateFolder `
         -DestinationPath $createdPath
     

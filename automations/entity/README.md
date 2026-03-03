@@ -68,7 +68,7 @@ Example:
 	"automations": [
 		{
 			"alias": "label-files",
-			"command": "& (Join-Path $env:APP_DIR 'scripts/Label-Files.ps1')"
+			"command": "& (Join-Path $env:APP_DIR '../utils/organization/Label-Files.ps1')"
 		}
 	]
 }
@@ -115,8 +115,8 @@ Creates one archive per label for top-level files in a Google Drive folder (labe
 Examples:
 
 - Create ZIP archives under `<Path>/archives`:
-	- `./scripts/Archive-FilesByLabel.ps1 -Path "gdrive:clients/acme/inbox"`
+	- `../utils/organization/Archive-FilesByLabel.ps1 -Path "gdrive:clients/acme/inbox"`
 - Use 7z:
-	- `./scripts/Archive-FilesByLabel.ps1 -Path "gdrive:clients/acme/inbox" -ArchiveExtension 7z`
+	- `../utils/organization/Archive-FilesByLabel.ps1 -Path "gdrive:clients/acme/inbox" -ArchiveExtension 7z`
 - Use tar.gz and upload elsewhere:
-	- `./scripts/Archive-FilesByLabel.ps1 -Path "gdrive:clients/acme/inbox" -ArchiveExtension tar.gz -ArchiveDestinationPath "gdrive:clients/acme/archives"`
+	- `../utils/organization/Archive-FilesByLabel.ps1 -Path "gdrive:clients/acme/inbox" -ArchiveExtension tar.gz -ArchiveDestinationPath "gdrive:clients/acme/archives"`

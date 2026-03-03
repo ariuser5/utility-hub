@@ -38,7 +38,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$pathModule = Join-Path $PSScriptRoot '../../utils/PathUtil.psm1'
+$pathModule = Join-Path $PSScriptRoot '..\PathUtil.psm1'
 Import-Module $pathModule -Force
 
 $src = Resolve-UtilityHubPath -Path $SourcePath -PathType $SourcePathType
@@ -128,5 +128,8 @@ if ($src.PathType -eq 'Local' -and $dst.PathType -eq 'Local') {
 }
 
 Write-Host "`n✓ Successfully copied files to: $($dst.Normalized)" -ForegroundColor Green
-Write-Output "COPIED:$($dst.Normalized)"
+Write-Output ([pscustomobject]@{
+    Status = 'Copied'
+    Path = $dst.Normalized
+})
 exit 0
