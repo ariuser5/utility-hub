@@ -212,7 +212,8 @@ function Preview-Accountant {
 function Run-Automation {
     param(
         [Parameter(Mandatory = $true)][string]$Alias,
-        [Parameter(Mandatory = $true)][string]$Command
+        [Parameter(Mandatory = $true)][string]$Command,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory
     )
 
     # Set environment variables for automations
@@ -224,9 +225,10 @@ function Run-Automation {
     Write-Host ''
     Write-Info "Running automation '$Alias'"
     Write-Info "Command: $Command"
+    Write-Info "Working directory: $WorkingDirectory"
     Write-Host ''
 
-    $exitCode = Invoke-AutomationCommand -Alias $Alias -Command $Command -AppRoot $PSScriptRoot
+    $exitCode = Invoke-AutomationCommand -Alias $Alias -Command $Command -AppRoot $PSScriptRoot -WorkingDirectory $WorkingDirectory
 
     Write-Host ''
     Write-Info "Automation finished (exit code: $exitCode)"
@@ -248,9 +250,6 @@ function Automations-Menu {
             $paths = Get-AutomationConfigPaths -AppRoot $PSScriptRoot
             Write-Info "Expected config files:"
             Write-Info "- $($paths.Public)"
-            if ($paths.Private) {
-                Write-Info "- $($paths.Private)"
-            }
             Write-Host ''
             Read-Host 'Press Enter to go back'
             return
@@ -259,7 +258,16 @@ function Automations-Menu {
         $automation = Select-FromList -Title 'Select automation' -Items $automations -ItemLabel 'automations' -AllowQuit
         if ($null -eq $automation -or -not $automation.Command) { return }
 
-        Run-Automation -Alias $automation.Alias -Command $automation.Command
+        $workingDirectory = $PSScriptRoot
+        if ($automation.PSObject.Properties.Name -contains 'Source' -and $automation.Source) {
+            try {
+                $workingDirectory = Split-Path -Parent ([string]$automation.Source)
+            } catch {
+                $workingDirectory = $PSScriptRoot
+            }
+        }
+
+        Run-Automation -Alias $automation.Alias -Command $automation.Command -WorkingDirectory $workingDirectory
     }
 }
 
@@ -281,12 +289,7 @@ function Show-Settings {
 
     Write-Host ''
     $automationConfigPaths = Get-AutomationConfigPaths -AppRoot $PSScriptRoot
-    Write-Info "Automation config (public): $($automationConfigPaths.Public)"
-    if ($automationConfigPaths.Private) {
-        Write-Info "Automation config (private): $($automationConfigPaths.Private)"
-    } else {
-        Write-Info 'Automation config (private): APPDATA is not set.'
-    }
+    Write-Info "Automation config: $($automationConfigPaths.Public)"
 
     $automationCount = (Get-Automations -AppRoot $PSScriptRoot).Count
     Write-Info "Configured automations: $automationCount"

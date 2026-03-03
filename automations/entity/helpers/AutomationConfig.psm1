@@ -5,9 +5,9 @@ AutomationConfig.psm1
 Shared helpers for entity automation command config.
 
 Responsibilities:
-  - Resolve config file paths (public + private)
+    - Resolve config file path
   - Parse/validate config JSON entries
-  - Merge entries by alias (private overrides public)
+    - Build merged automation entries
   - Execute automation commands
 
 Exported functions:
@@ -25,77 +25,122 @@ function Get-AutomationConfigPaths {
 
     $publicConfigPath = Join-Path $AppRoot 'automations.json'
 
-    $privateConfigPath = $null
-    if ($env:APPDATA) {
-        $privateConfigPath = Join-Path (Join-Path (Join-Path $env:APPDATA 'utility-hub') 'automations') 'automations.json'
-    }
-
     return [pscustomobject]@{
-        Public  = $publicConfigPath
-        Private = $privateConfigPath
+        Public = $publicConfigPath
     }
 }
 
 function Read-AutomationEntriesFromFile {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][string]$ConfigPath)
+    param(
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
+        [Parameter()][hashtable]$Visited = @{}
+    )
 
-    if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
-        return @()
-    }
+    function Read-AutomationEntriesFromFileCore {
+        param(
+            [Parameter(Mandatory = $true)][string]$CurrentPath,
+            [Parameter(Mandatory = $true)][hashtable]$VisitedMap
+        )
 
-    $raw = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
-    if (-not $raw -or -not $raw.Trim()) {
-        return @()
-    }
-
-    try {
-        $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
-    } catch {
-        throw "Invalid JSON in automation config '$ConfigPath': $($_.Exception.Message)"
-    }
-
-    $entries = @()
-    if ($parsed -is [array]) {
-        $entries = @($parsed)
-    } elseif ($parsed.PSObject.Properties.Name -contains 'automations') {
-        $entries = @($parsed.automations)
-    } else {
-        throw "Automation config '$ConfigPath' must be either an array or an object with an 'automations' array."
-    }
-
-    $result = @()
-    for ($i = 0; $i -lt $entries.Count; $i++) {
-        $entry = $entries[$i]
-        $entryIndex = $i + 1
-
-        if ($null -eq $entry) {
-            throw "Automation config '$ConfigPath' has a null entry at index $entryIndex."
+        if (-not (Test-Path -LiteralPath $CurrentPath -PathType Leaf)) {
+            return @()
         }
 
-        $alias = if ($entry.PSObject.Properties.Name -contains 'alias') { [string]$entry.alias } else { '' }
-        $command = if ($entry.PSObject.Properties.Name -contains 'command') { [string]$entry.command } else { '' }
-
-        $alias = ($alias ?? '').Trim()
-        $command = ($command ?? '').Trim()
-
-        if (-not $alias) {
-            throw "Automation config '$ConfigPath' entry $entryIndex is missing 'alias'."
+        $resolvedPath = $CurrentPath
+        try {
+            $resolvedPath = (Resolve-Path -LiteralPath $CurrentPath -ErrorAction Stop).Path
+        } catch {
+            return @()
         }
 
-        if (-not $command) {
-            throw "Automation config '$ConfigPath' entry $entryIndex is missing 'command'."
+        if ($VisitedMap.ContainsKey($resolvedPath)) {
+            return @()
+        }
+        $VisitedMap[$resolvedPath] = $true
+
+        $raw = $null
+        try {
+            $raw = Get-Content -LiteralPath $resolvedPath -Raw -Encoding UTF8 -ErrorAction Stop
+        } catch {
+            return @()
         }
 
-        $result += [pscustomobject]@{
+        if (-not $raw -or -not $raw.Trim()) {
+            return @()
+        }
+
+        $parsed = $null
+        try {
+            $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            return @()
+        }
+
+        $entries = @()
+        if ($parsed -is [array]) {
+            $entries = @($parsed)
+        } elseif ($parsed.PSObject.Properties.Name -contains 'automations') {
+            $entries = @($parsed.automations)
+        } else {
+            return @()
+        }
+
+        $baseDir = Split-Path -Parent $resolvedPath
+        $result = @()
+
+        foreach ($entry in $entries) {
+            if ($null -eq $entry) { continue }
+
+            $hasImport = $entry.PSObject.Properties.Name -contains 'import'
+            $hasAlias = $entry.PSObject.Properties.Name -contains 'alias'
+            $hasCommand = $entry.PSObject.Properties.Name -contains 'command'
+
+            if ($hasImport) {
+                $importSpec = $entry.import
+                if ($null -eq $importSpec) { continue }
+
+                if (-not ($importSpec.PSObject.Properties.Name -contains 'path')) {
+                    continue
+                }
+
+                $importValue = ([string]$importSpec.path ?? '').Trim()
+                if (-not $importValue) { continue }
+
+                try {
+                    $importValue = $ExecutionContext.InvokeCommand.ExpandString($importValue)
+                } catch {
+                    continue
+                }
+
+                $importPath = if ([System.IO.Path]::IsPathRooted($importValue)) {
+                    $importValue
+                } else {
+                    Join-Path -Path $baseDir -ChildPath $importValue
+                }
+
+                $result += @(Read-AutomationEntriesFromFileCore -CurrentPath $importPath -VisitedMap $VisitedMap)
+                continue
+            }
+
+            if (-not $hasAlias -or -not $hasCommand) { continue }
+
+            $alias = ([string]$entry.alias ?? '').Trim()
+            $command = ([string]$entry.command ?? '').Trim()
+            if (-not $alias -or -not $command) { continue }
+
+            $result += [pscustomobject]@{
                 Name    = $alias
                 Alias   = $alias
                 Command = $command
-                Source  = $ConfigPath
+                Source  = $resolvedPath
             }
+        }
+
+        return @($result)
     }
 
-    return @($result)
+    return @(Read-AutomationEntriesFromFileCore -CurrentPath $ConfigPath -VisitedMap $Visited)
 }
 
 function Get-Automations {
@@ -110,9 +155,6 @@ function Get-Automations {
     $orderedAliases = @()
 
     $configs = @($paths.Public)
-    if ($paths.Private) {
-        $configs += $paths.Private
-    }
 
     foreach ($configPath in $configs) {
         $entries = @(Read-AutomationEntriesFromFile -ConfigPath $configPath)
@@ -137,18 +179,29 @@ function Invoke-AutomationCommand {
     param(
         [Parameter(Mandatory = $true)][string]$Alias,
         [Parameter(Mandatory = $true)][string]$Command,
-        [Parameter(Mandatory = $true)][string]$AppRoot
+        [Parameter(Mandatory = $true)][string]$AppRoot,
+        [Parameter()][string]$WorkingDirectory
     )
 
     $utilityHubRoot = Split-Path (Split-Path $AppRoot -Parent) -Parent
     $env:UTILITY_HUB_ROOT = $utilityHubRoot
     $env:APP_DIR = $AppRoot
 
+    $effectiveWorkingDirectory = $AppRoot
+    if ($WorkingDirectory -and (Test-Path -LiteralPath $WorkingDirectory -PathType Container)) {
+        try {
+            $effectiveWorkingDirectory = (Resolve-Path -LiteralPath $WorkingDirectory -ErrorAction Stop).Path
+        } catch {
+            $effectiveWorkingDirectory = $AppRoot
+        }
+    }
+
     $escapedAppRoot = $AppRoot -replace "'", "''"
+    $escapedWorkingDirectory = $effectiveWorkingDirectory -replace "'", "''"
     $composedCommand = @(
         "`$ErrorActionPreference = 'Stop'"
         "`$PSScriptRoot = '$escapedAppRoot'"
-        "Set-Location -LiteralPath '$escapedAppRoot'"
+        "Set-Location -LiteralPath '$escapedWorkingDirectory'"
         $Command
     ) -join "; "
 

@@ -50,16 +50,24 @@ Automation menu source:
 
 - `App-Main.ps1` reads commands from JSON config files (no script auto-discovery).
 - Public config (tracked in repo): `automations/entity/automations.json`
-- Private config (local-only): `%APPDATA%\utility-hub\automations\automations.json`
-- Merge rule: private entries override public ones when `alias` matches (case-insensitive).
 
 Automation config schema:
 
 - Preferred: object with `automations` array
 - Also supported: top-level array
-- Each item requires:
+- Each item is either:
 	- `alias`: string
 	- `command`: string (PowerShell command executed by `pwsh -Command`)
+	- OR `import`: object with:
+		- `path`: string (path to another automations JSON file)
+
+Import behavior:
+
+- Imported automations are expanded in-place, preserving declared order.
+- `import.path` can be absolute or relative (relative paths resolve from the JSON file containing the `import`).
+- `import.path` supports environment-variable expansion (for example: `$env:UTILITY_HUB_ROOT\\_submodules\\automation-scripts\\scripts\\export.json`).
+- If an import file is missing or invalid, it is ignored (non-breaking).
+- Automation commands run with working directory set to the folder of the JSON file that declared that automation.
 
 Example:
 
@@ -69,6 +77,11 @@ Example:
 		{
 			"alias": "label-files",
 			"command": "& (Join-Path $env:APP_DIR '../utils/organization/Label-Files.ps1')"
+		},
+		{
+			"import": {
+				"path": "$env:UTILITY_HUB_ROOT\\_submodules\\automation-scripts\\scripts\\export.json"
+			}
 		}
 	]
 }

@@ -1,8 +1,13 @@
 {
-  "automations": [
-    {
-		"alias": "sample-automation",
-		"command": "& (Join-Path $PSScriptRoot 'resources/samples/Example-Automation.ps1')"
-    }
-  ]
+    "automations": [
+        {
+            "alias": "sample-automation",
+            "command": "& (Join-Path $APP_DIR 'resources/samples/Example-Automation.ps1')"
+        },
+        {
+            "import": {
+                "path": "$env:UTILITY_HUB_ROOT/_submodules/automation-scripts/scripts/export.json"
+            }
+        }
+    ]
 }
