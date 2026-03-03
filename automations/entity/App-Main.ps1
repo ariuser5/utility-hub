@@ -219,6 +219,7 @@ function Run-Automation {
     $utilityHubRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     $env:UTILITY_HUB_ROOT = $utilityHubRoot
     $env:APP_DIR = $PSScriptRoot
+    $env:UTILS_ROOT = Join-Path $utilityHubRoot 'automations\utils'
 
     Write-Host ''
     Write-Info "Running automation '$Alias'"
