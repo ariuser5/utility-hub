@@ -20,12 +20,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$pathModule = Join-Path $PSScriptRoot '..\utils\PathUtil.psm1'
+$pathModule = Join-Path $PSScriptRoot '..\utils\PathUtils.psm1'
 Import-Module $pathModule -Force
 
 $destInfo = $null
 try {
-    $destInfo = Resolve-UtilityHubPath -Path $Destination -PathType $DestinationPathType
+    $destInfo = Resolve-UnifiedPath -Path $Destination -PathType $DestinationPathType
     if ($destInfo.PathType -ne 'Remote') {
         throw "Destination must be an rclone remote spec like '<remote>:<path>'. Destination='$Destination'"
     }

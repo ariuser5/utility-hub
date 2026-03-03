@@ -44,13 +44,13 @@ $ErrorActionPreference = "Stop"
 # Month short names mapping in order (jan..dec)
 $months = @("jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec")
 
-$pathModule = Join-Path $PSScriptRoot '..\PathUtil.psm1'
+$pathModule = Join-Path $PSScriptRoot '..\PathUtils.psm1'
 Import-Module $pathModule -Force
 
 $lastMonthScript = Join-Path $PSScriptRoot '.\Get-LastMonth.ps1'
 
 $baseInfo = $null
-$baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
+$baseInfo = Resolve-UnifiedPath -Path $Path -PathType $PathType
 
 # Get list of existing directories
 $existingDirs = @()
@@ -118,7 +118,7 @@ while ($true) {
     $missing = "$($months[$nextIdx])-$currentYear"
     $newFolderName = "$NewFolderPrefix$missing"
     Write-Host "Creating new folder: $newFolderName" -ForegroundColor Yellow
-    $targetPath = Join-UtilityHubPath -Base $baseInfo.Normalized -Child $newFolderName -PathType $baseInfo.PathType
+    $targetPath = Join-UnifiedPath -Base $baseInfo.Normalized -Child $newFolderName -PathType $baseInfo.PathType
     break
 }
 

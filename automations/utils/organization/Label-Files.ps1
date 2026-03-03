@@ -98,8 +98,8 @@ function Resolve-Labels {
     return ,$resolved
 }
 
-# Editor module provides Invoke-UtilityHubEditor function
-$editorModule = Join-Path $PSScriptRoot '..\EditorUtil.psm1'
+# Editor module provides Invoke-Editor function
+$editorModule = Join-Path $PSScriptRoot '..\EditorUtils.psm1'
 Import-Module $editorModule -Force
 
 function New-RebaseTodoText {
@@ -582,12 +582,12 @@ if ($ExcludeNameRegex) {
     $excludeRegexObj = [regex]$ExcludeNameRegex
 }
 
-$pathModule = Join-Path $PSScriptRoot '..\PathUtil.psm1'
+$pathModule = Join-Path $PSScriptRoot '..\PathUtils.psm1'
 Import-Module $pathModule -Force
 
 $baseInfo = $null
 try {
-    $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
+    $baseInfo = Resolve-UnifiedPath -Path $Path -PathType $PathType
 } catch {
     Write-Error $_.Exception.Message
     exit 1
@@ -792,7 +792,7 @@ while ($true) {
         $regenerateTodo = $false
     }
 
-    $editResult = Invoke-UtilityHubEditor -FilePath $tmpTodo
+    $editResult = Invoke-Editor -FilePath $tmpTodo
     if ($editResult -and $editResult.Mode -eq 'abort') {
         Write-Host "Aborted (no changes made)." -ForegroundColor Yellow
         Remove-Item -LiteralPath $tmpTodo -ErrorAction SilentlyContinue

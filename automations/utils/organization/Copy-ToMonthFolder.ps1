@@ -38,11 +38,11 @@
 
 $ErrorActionPreference = "Stop"
 
-$pathModule = Join-Path $PSScriptRoot '..\PathUtil.psm1'
+$pathModule = Join-Path $PSScriptRoot '..\PathUtils.psm1'
 Import-Module $pathModule -Force
 
-$src = Resolve-UtilityHubPath -Path $SourcePath -PathType $SourcePathType
-$dst = Resolve-UtilityHubPath -Path $DestinationPath -PathType $DestinationPathType
+$src = Resolve-UnifiedPath -Path $SourcePath -PathType $SourcePathType
+$dst = Resolve-UnifiedPath -Path $DestinationPath -PathType $DestinationPathType
 
 # Validate source folder exists
 if ($src.PathType -eq 'Local') {

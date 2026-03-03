@@ -44,10 +44,10 @@ $ensureScriptPath = Join-Path $scriptDir ".\Ensure-NewMonthFolder.ps1"
 $copyScriptPath = Join-Path $scriptDir ".\Copy-ToMonthFolder.ps1"
 $templateFolder = Join-Path $scriptDir "..\..\entity\resources\monthly_report_template"
 
-$pathModule = Join-Path $scriptDir "..\PathUtil.psm1"
+$pathModule = Join-Path $scriptDir "..\PathUtils.psm1"
 Import-Module $pathModule -Force
 
-$baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
+$baseInfo = Resolve-UnifiedPath -Path $Path -PathType $PathType
 
 # Validate scripts exist
 if (-not (Test-Path $ensureScriptPath)) {

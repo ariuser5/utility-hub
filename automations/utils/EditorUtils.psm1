@@ -1,6 +1,6 @@
 <#
 -------------------------------------------------------------------------------
-EditorUtil.psm1
+EditorUtils.psm1
 -------------------------------------------------------------------------------
 Shared editor launch + wait helpers (git-rebase-like flows).
 
@@ -19,11 +19,11 @@ Notes:
       - 'q' abort
 
 Exported functions:
-  - Invoke-UtilityHubEditor
+    - Invoke-Editor
 -------------------------------------------------------------------------------
 #>
 
-function Split-UtilityHubCommandLine {
+function Split-CommandLine {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -59,7 +59,7 @@ function Split-UtilityHubCommandLine {
     return ,$tokens.ToArray()
 }
 
-function Test-UtilityHubExecutableAvailable {
+function Test-ExecutableAvailable {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -76,7 +76,7 @@ function Test-UtilityHubExecutableAvailable {
     return ($null -ne (Get-Command $Exe -ErrorAction SilentlyContinue))
 }
 
-function Resolve-UtilityHubEditorCommand {
+function Resolve-EditorCommand {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -106,13 +106,13 @@ function Resolve-UtilityHubEditorCommand {
     }
 
     foreach ($candidate in $candidateLines) {
-        $parts = Split-UtilityHubCommandLine -CommandLine $candidate
+        $parts = Split-CommandLine -CommandLine $candidate
         if (-not $parts -or $parts.Count -lt 1) {
             continue
         }
 
         $exe = $parts[0]
-        if (-not (Test-UtilityHubExecutableAvailable -Exe $exe)) {
+        if (-not (Test-ExecutableAvailable -Exe $exe)) {
             if ($userSpecifiedCommand -and $candidate -eq $userSpecifiedCommand) {
                 Write-Host "Editor from ${userSpecifiedSource} not found: ${userSpecifiedCommand}. Falling back..." -ForegroundColor DarkYellow
             }
@@ -159,14 +159,14 @@ function Resolve-UtilityHubEditorCommand {
     throw "No supported editor found. Set UTILITY_HUB_EDITOR/VISUAL/EDITOR to a valid editor command."
 }
 
-function Invoke-UtilityHubEditor {
+function Invoke-Editor {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [string]$FilePath
     )
 
-    $cmd = Resolve-UtilityHubEditorCommand -FilePath $FilePath
+    $cmd = Resolve-EditorCommand -FilePath $FilePath
     Write-Host "Opening editor: $($cmd.Exe) $($cmd.ArgumentList -join ' ')" -ForegroundColor DarkGray
 
     if ($cmd.RunInTerminal) {
@@ -203,4 +203,4 @@ function Invoke-UtilityHubEditor {
     }
 }
 
-Export-ModuleMember -Function Invoke-UtilityHubEditor
+Export-ModuleMember -Function Invoke-Editor

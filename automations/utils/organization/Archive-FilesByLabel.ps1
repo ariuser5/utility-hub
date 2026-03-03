@@ -64,12 +64,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$pathModule = Join-Path $PSScriptRoot '..\PathUtil.psm1'
+$pathModule = Join-Path $PSScriptRoot '..\PathUtils.psm1'
 Import-Module $pathModule -Force
 
 $baseInfo = $null
 try {
-    $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
+    $baseInfo = Resolve-UnifiedPath -Path $Path -PathType $PathType
 } catch {
     Write-Error $_.Exception.Message
     exit 1
@@ -111,7 +111,7 @@ function Get-LabelFileSelector {
 }
 
 if (-not $ArchiveDestinationPath -or -not $ArchiveDestinationPath.Trim()) {
-    $ArchiveDestinationPath = Join-UtilityHubPath -Base $baseInfo.Normalized -Child 'archives' -PathType $baseInfo.PathType
+    $ArchiveDestinationPath = Join-UnifiedPath -Base $baseInfo.Normalized -Child 'archives' -PathType $baseInfo.PathType
 }
 
 $archiveExt = Convert-ArchiveExtension -Ext $ArchiveExtension
@@ -126,9 +126,9 @@ if ($baseInfo.PathType -eq 'Remote') {
     # Destination may be a full remote spec or a remote-path-only. Parse it.
     $destInfo = $null
     if ($ArchiveDestinationPath -match '^[^\\/]+:.+$' -or $ArchiveDestinationPath -match '^[^\\/]+:$') {
-        $destInfo = Resolve-UtilityHubPath -Path $ArchiveDestinationPath -PathType 'Remote'
+        $destInfo = Resolve-UnifiedPath -Path $ArchiveDestinationPath -PathType 'Remote'
     } else {
-        $destInfo = Resolve-UtilityHubPath -Path ("{0}:{1}" -f $baseInfo.RemoteName, $ArchiveDestinationPath) -PathType 'Remote'
+        $destInfo = Resolve-UnifiedPath -Path ("{0}:{1}" -f $baseInfo.RemoteName, $ArchiveDestinationPath) -PathType 'Remote'
     }
 
     $uploadRemoteName = $destInfo.RemoteName

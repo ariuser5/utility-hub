@@ -34,12 +34,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$pathModule = Join-Path $PSScriptRoot '..\utils\PathUtil.psm1'
+$pathModule = Join-Path $PSScriptRoot '..\utils\PathUtils.psm1'
 Import-Module $pathModule -Force
 
 $baseInfo = $null
 try {
-    $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
+    $baseInfo = Resolve-UnifiedPath -Path $Path -PathType $PathType
 } catch {
     Write-Error $_.Exception.Message
     exit 1

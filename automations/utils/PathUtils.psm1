@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Resolve-UtilityHubPath {
+function Resolve-UnifiedPath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -71,7 +71,7 @@ function Resolve-UtilityHubPath {
     }
 }
 
-function Join-UtilityHubPath {
+function Join-UnifiedPath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -85,7 +85,7 @@ function Join-UtilityHubPath {
         [string]$PathType = 'Auto'
     )
 
-    $baseInfo = Resolve-UtilityHubPath -Path $Base -PathType $PathType
+    $baseInfo = Resolve-UnifiedPath -Path $Base -PathType $PathType
     $childTrim = ($Child ?? '').ToString().Trim()
     if (-not $childTrim) {
         return $baseInfo.Normalized
@@ -100,4 +100,4 @@ function Join-UtilityHubPath {
     return (Join-Path -Path $baseInfo.LocalPath -ChildPath $childTrim)
 }
 
-Export-ModuleMember -Function Resolve-UtilityHubPath, Join-UtilityHubPath
+Export-ModuleMember -Function Resolve-UnifiedPath, Join-UnifiedPath
