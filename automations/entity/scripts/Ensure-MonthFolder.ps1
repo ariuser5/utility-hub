@@ -56,14 +56,25 @@ $baseInfo = Resolve-UtilityHubPath -Path $Path -PathType $PathType
 $existingDirs = @()
 if ($baseInfo.PathType -eq 'Remote') {
     try {
-        $existingDirs = rclone lsf $baseInfo.Normalized --dirs-only
+        $existingDirs = @(rclone lsf $baseInfo.Normalized --dirs-only)
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to list remote directory '$($baseInfo.Normalized)' (exit code $LASTEXITCODE). Ensure rclone is configured and the path exists."
+            exit 1
+        }
+
+        # rclone --dirs-only returns folder names with trailing '/'
+        $existingDirs = @(
+            $existingDirs |
+                Where-Object { $_ -ne $null -and $_ -ne '' } |
+                ForEach-Object { $_.TrimEnd('/') }
+        )
     } catch {
         Write-Error "Failed to list remote directory '$($baseInfo.Normalized)'. Ensure rclone is configured and the path exists."
         exit 1
     }
 } else {
     try {
-        $existingDirs = Get-ChildItem -LiteralPath $baseInfo.LocalPath -Directory -ErrorAction Stop | Select-Object -ExpandProperty Name
+        $existingDirs = @(Get-ChildItem -LiteralPath $baseInfo.LocalPath -Directory -ErrorAction Stop | Select-Object -ExpandProperty Name)
     } catch {
         Write-Error "Failed to list local directory '$($baseInfo.LocalPath)'. Ensure the path exists."
         exit 1
@@ -77,10 +88,14 @@ Write-Host "Scanning $where directory: $($baseInfo.Normalized)" -ForegroundColor
 $currentYear = $StartYear
 while ($true) {
     # Filter directories for the current year
-    $yearDirs = $existingDirs | Where-Object { $_ -match "^_*[a-z]{3}-$currentYear$" }
+    $yearDirs = @($existingDirs | Where-Object { $_ -match "^_*[a-z]{3}-$currentYear$" })
     
     # Get the latest month for this year using the MonthPattern module
-    $latestMonth = Get-LatestMonthPattern -Values $yearDirs -SkipInvalid $true
+    $latestMonth = if ($yearDirs.Count -gt 0) {
+        Get-LatestMonthPattern -Values $yearDirs -SkipInvalid $true
+    } else {
+        $null
+    }
     
     # Extract month index from the latest month
     $latestIdx = -1
