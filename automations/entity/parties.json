@@ -1,27 +1,5 @@
 {
   "import": {
     "path": "$env:UTILITY_HUB_ROOT/_submodules/automation-scripts/data/parties.json"
-  },
-  "accountants": [
-    {
-      "name": "AccountantA",
-      "data": {
-        "location": "C:/accountantA"
-      }
-    }
-  ],
-  "clients": [
-    {
-      "name": "ClientA",
-      "data": {
-        "location": "C:/clients/ClientA"
-      }
-    },
-    {
-      "name": "ClientB",
-      "data": {
-        "location": "gdrive:Documents/work/clienti/ClientB"
-      }
-    }
-  ]
+  }
 }
