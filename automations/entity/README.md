@@ -89,24 +89,29 @@ Example:
 
 Examples:
 
-- Default (loads static data from `%LOCALAPPDATA%\utility-hub\data\contacts-data.json` if it exists):
+- Default (loads parties config from `automations/entity/parties.json`):
 	- `./App-Main.ps1`
 
 Configure roots:
 
-- Create `%LOCALAPPDATA%\utility-hub\data\contacts-data.json` (see `contacts-data.example.json`).
-- Or pass `-StaticDataFile` to load config from elsewhere.
+- Configure `automations/entity/parties.json` (see `samples/parties.example.json`).
 
-Config file schema (`contacts-data.json`):
+Config file schema (`parties.json`):
 
-- `AccountantRoot`: string
-- `Clients`: either a hashtable/object (`{ "ClientA": "C:\\..." }`) or an array of strings (`["ClientA=C:\\...", "gdrive:..."]`)
+- `import` (optional): object with:
+	- `path`: string (absolute/relative path to another parties JSON; env variables supported)
+- `accountants`: array of objects with:
+	- `name`: string
+	- `data.location`: string
+- `clients`: array of objects with:
+	- `name`: string
+	- `data.location`: string
 
 Notes:
 
-- Each client entry can be `Alias=Path` or just `Path`.
-- If no alias is provided, the alias is derived from the last path segment.
-- `Path` can be a filesystem path or an rclone remote spec like `gdrive:clients/foo`.
+- Imported parties are loaded recursively; missing/invalid imports are ignored.
+- If duplicate client names exist after merge, startup fails with a duplicate-alias error.
+- `data.location` can be a filesystem path or an rclone remote spec like `gdrive:clients/foo`.
 
 Navigation preview commands:
 

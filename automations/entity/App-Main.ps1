@@ -17,13 +17,7 @@ Notes:
 #>
 
 [CmdletBinding()]
-param(
-    # Optional JSON config file.
-    # If not provided, defaults to: %LOCALAPPDATA%\utility-hub\data\contacts-data.json (if it exists).
-    [Parameter()]
-    [Alias('ConfigPath')]
-    [string]$StaticDataFile
-)
+param()
 
 $ErrorActionPreference = 'Stop'
 
@@ -37,10 +31,8 @@ Import-Module $entityConfigModule -Force
 $automationConfigModule = Join-Path $PSScriptRoot '.\helpers\AutomationConfig.psm1'
 Import-Module $automationConfigModule -Force
 
-$init = Initialize-EntityConfig -StaticDataFile $StaticDataFile -BoundParameters $PSBoundParameters
+$init = Initialize-EntityConfig -AppRoot $PSScriptRoot
 $Config = $init.Config
-$defaultStaticDataFile = $init.DefaultStaticDataFile
-$resolvedStaticDataFile = $init.ResolvedStaticDataFile
 
 function Write-Heading {
     param([Parameter(Mandatory = $true)][string]$Text)
@@ -201,12 +193,22 @@ function Browse-Clients {
 }
 
 function Preview-Accountant {
-    $root = ($Config.AccountantRoot ?? '').Trim()
-    if (-not $root) {
-        throw 'AccountantRoot is not configured. Set Config.AccountantRoot in static data.'
+    $accountants = Resolve-Accountants -Config $Config
+    if (-not $accountants -or $accountants.Count -eq 0) {
+        throw 'No accountants are configured. Set parties.json (accountants[]).'
     }
 
-    Start-Preview -Root $root -Title 'Accountant preview'
+    while ($true) {
+        Clear-Host
+        Write-Heading 'Accountants'
+        Write-Info "Count: $($accountants.Count)"
+        Write-Host ''
+
+        $accountant = Select-FromList -Title 'Select accountant' -Items $accountants -ItemLabel 'accountants' -AllowQuit
+        if (-not $accountant) { return }
+
+        Start-Preview -Root $accountant.Root -Title "Accountant preview: $($accountant.Name)"
+    }
 }
 
 function Run-Automation {
@@ -275,7 +277,15 @@ function Show-Settings {
     Clear-Host
     Write-Heading 'Settings'
 
-    Write-Info "AccountantRoot: $($Config.AccountantRoot)"
+    $accountants = Resolve-Accountants -Config $Config
+    if (-not $accountants -or $accountants.Count -eq 0) {
+        Write-Warn 'Accountants: (none configured)'
+    } else {
+        Write-Info "Accountants ($($accountants.Count)):\n"
+        foreach ($a in $accountants) {
+            Write-Host ("- {0} -> {1}" -f $a.Name, $a.Root) -ForegroundColor Gray
+        }
+    }
 
     $clients = Resolve-Clients -Config $Config
     if (-not $clients -or $clients.Count -eq 0) {
@@ -295,15 +305,7 @@ function Show-Settings {
     Write-Info "Configured automations: $automationCount"
 
     Write-Host ''
-    if ($resolvedStaticDataFile) {
-        Write-Info "Static data file: $resolvedStaticDataFile"
-    } else {
-        if ($defaultStaticDataFile) {
-            Write-Info "Static data file: (none loaded) - create $defaultStaticDataFile or pass -StaticDataFile"
-        } else {
-            Write-Info "Static data file: (none loaded) - set LOCALAPPDATA or pass -StaticDataFile"
-        }
-    }
+    Write-Info "Parties config: $(Join-Path $PSScriptRoot 'parties.json')"
     Write-Host ''
     Read-Host 'Press Enter to go back'
 }
@@ -325,7 +327,7 @@ while ($true) {
 
     Write-Host '[1] Automations' -ForegroundColor Gray
     Write-Host '[2] Browse clients (navigation preview)' -ForegroundColor Gray
-    Write-Host '[3] Preview accountant (navigation preview)' -ForegroundColor Gray
+    Write-Host '[3] Browse accountants (navigation preview)' -ForegroundColor Gray
     Write-Host '[4] Settings' -ForegroundColor Gray
     Write-Host '[q] Quit' -ForegroundColor Gray
 

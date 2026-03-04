@@ -5,12 +5,13 @@ EntityConfig.psm1
 Shared static-data/config helpers for entity automations.
 
 Responsibilities:
-  - Discover default static data file path
+    - Discover default parties config file path
   - Parse/merge JSON config into defaults
   - Normalize and resolve client entries (aliases + roots)
 
 Exported functions:
   - Initialize-EntityConfig
+    - Resolve-Accountants
   - Resolve-Clients
 -------------------------------------------------------------------------------
 #>
@@ -21,20 +22,19 @@ function New-EntityConfig {
 
     return [pscustomobject]@{
         AccountantRoot  = ''
+        Accountants     = @()
         Clients         = @()
         PreviewMaxDepth = 0
     }
 }
 
-function Get-DefaultEntityStaticDataFile {
+function Get-DefaultEntityPartiesFile {
     [CmdletBinding()]
-    param()
+    param(
+        [Parameter(Mandatory = $true)][string]$AppRoot
+    )
 
-    if (-not $env:LOCALAPPDATA) {
-        return $null
-    }
-
-    return Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'utility-hub') 'data') 'contacts-data.json'
+    return Join-Path $AppRoot 'parties.json'
 }
 
 function Import-EntityConfigJson {
@@ -59,6 +59,61 @@ function Import-EntityConfigJson {
     }
 }
 
+function Get-ConfigPropertyValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object]$Object,
+        [Parameter(Mandatory = $true)][string[]]$Names
+    )
+
+    if ($null -eq $Object) { return $null }
+
+    if ($Object -is [System.Collections.IDictionary]) {
+        foreach ($name in $Names) {
+            foreach ($key in $Object.Keys) {
+                if ([string]$key -ieq $name) {
+                    return $Object[$key]
+                }
+            }
+        }
+    }
+
+    if ($null -ne $Object.PSObject -and $null -ne $Object.PSObject.Properties) {
+        foreach ($name in $Names) {
+            foreach ($property in $Object.PSObject.Properties) {
+                if ($property.Name -ieq $name) {
+                    return $property.Value
+                }
+            }
+        }
+    }
+
+    return $null
+}
+
+function Get-EntryName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][object]$Entry)
+
+    $name = Get-ConfigPropertyValue -Object $Entry -Names @('name')
+    return ([string]($name ?? '')).Trim()
+}
+
+function Get-EntryLocation {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][object]$Entry)
+
+    $data = Get-ConfigPropertyValue -Object $Entry -Names @('data')
+    if ($null -ne $data) {
+        $nestedLocation = Get-ConfigPropertyValue -Object $data -Names @('location')
+        $nested = ([string]($nestedLocation ?? '')).Trim()
+        if ($nested) { return $nested }
+    }
+
+    $flatLocation = Get-ConfigPropertyValue -Object $Entry -Names @('location', 'path', 'root')
+    return ([string]($flatLocation ?? '')).Trim()
+}
+
 function Merge-EntityConfig {
     [CmdletBinding()]
     param(
@@ -68,12 +123,123 @@ function Merge-EntityConfig {
 
     if ($null -eq $Source) { return }
 
-    foreach ($propName in @('AccountantRoot', 'Clients', 'PreviewMaxDepth')) {
-        $p = $Source.PSObject.Properties[$propName]
-        if ($null -ne $p -and $null -ne $p.Value) {
-            $Target.$propName = $p.Value
+    $accountantsValue = Get-ConfigPropertyValue -Object $Source -Names @('accountants')
+    if ($null -ne $accountantsValue) {
+        $existingAccountants = @()
+        if ($null -ne $Target.Accountants) {
+            $existingAccountants = @($Target.Accountants)
+        }
+
+        $incomingAccountants = @($accountantsValue)
+        if ($existingAccountants.Count -gt 0) {
+            $Target.Accountants = @($existingAccountants + $incomingAccountants)
+        } else {
+            $Target.Accountants = $accountantsValue
+        }
+
+        $accountants = @($accountantsValue)
+        foreach ($acc in $accountants) {
+            if ($null -eq $acc) { continue }
+
+            $accRoot = Get-EntryLocation -Entry $acc
+
+            if ($accRoot) {
+                $Target.AccountantRoot = $accRoot
+                break
+            }
         }
     }
+
+    $clientsValue = Get-ConfigPropertyValue -Object $Source -Names @('clients')
+    if ($null -ne $clientsValue) {
+        $existingClients = @()
+        if ($null -ne $Target.Clients) {
+            $existingClients = @($Target.Clients)
+        }
+
+        $incomingClients = @($clientsValue)
+        if ($existingClients.Count -gt 0) {
+            $Target.Clients = @($existingClients + $incomingClients)
+        } else {
+            $Target.Clients = $clientsValue
+        }
+    }
+
+    $accountantRoot = Get-ConfigPropertyValue -Object $Source -Names @('accountantRoot')
+    if ($null -ne $accountantRoot) {
+        $Target.AccountantRoot = $accountantRoot
+    }
+
+    $previewMaxDepth = Get-ConfigPropertyValue -Object $Source -Names @('previewMaxDepth')
+    if ($null -ne $previewMaxDepth) {
+        $Target.PreviewMaxDepth = $previewMaxDepth
+    }
+}
+
+function Resolve-Accountants {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Config
+    )
+
+    $results = @()
+
+    $inputVal = Get-ConfigPropertyValue -Object $Config -Names @('accountants')
+    if ($null -eq $inputVal) { return @() }
+
+    $entries = @()
+    if ($inputVal -is [string]) {
+        $entries = @($inputVal)
+    } elseif ($inputVal -is [object[]]) {
+        $entries = @($inputVal)
+    } else {
+        $entries = @($inputVal)
+    }
+
+    foreach ($entry in $entries) {
+        if ($null -eq $entry) { continue }
+
+        if ($entry -is [pscustomobject] -or $entry -is [System.Collections.IDictionary]) {
+            $name = Get-EntryName -Entry $entry
+            $root = Get-EntryLocation -Entry $entry
+
+            if (-not $root) { continue }
+            if (-not $name) { $name = Get-AliasFromPath -Path $root }
+            if (-not $name) { continue }
+
+            $results += [pscustomobject]@{ Name = $name; Root = $root }
+            continue
+        }
+
+        $s = $entry.ToString().Trim()
+        if (-not $s) { continue }
+
+        $name = ''
+        $root = ''
+
+        $eqIdx = $s.IndexOf('=')
+        if ($eqIdx -gt 0) {
+            $name = $s.Substring(0, $eqIdx).Trim()
+            $root = $s.Substring($eqIdx + 1).Trim()
+        } else {
+            $root = $s
+            $name = Get-AliasFromPath -Path $root
+        }
+
+        if (-not $root) { continue }
+        if (-not $name) { $name = Get-AliasFromPath -Path $root }
+        if (-not $name) { continue }
+
+        $results += [pscustomobject]@{ Name = $name; Root = $root }
+    }
+
+    $dupes = $results | Group-Object Name | Where-Object { $_.Count -gt 1 }
+    if ($dupes) {
+        $names = ($dupes | ForEach-Object { $_.Name }) -join ', '
+        throw "Duplicate accountant aliases detected: $names"
+    }
+
+    return $results | Sort-Object Name
 }
 
 function Get-AliasFromPath {
@@ -123,7 +289,7 @@ function Resolve-Clients {
 
     $results = @()
 
-    $inputVal = $Config.Clients
+    $inputVal = Get-ConfigPropertyValue -Object $Config -Names @('clients')
     if ($null -eq $inputVal) { return @() }
 
     if ($inputVal -is [System.Collections.IDictionary]) {
@@ -163,6 +329,19 @@ function Resolve-Clients {
 
     foreach ($entry in $entries) {
         if ($null -eq $entry) { continue }
+
+        if ($entry -is [pscustomobject] -or $entry -is [System.Collections.IDictionary]) {
+            $name = Get-EntryName -Entry $entry
+            $root = Get-EntryLocation -Entry $entry
+
+            if (-not $root) { continue }
+            if (-not $name) { $name = Get-AliasFromPath -Path $root }
+            if (-not $name) { continue }
+
+            $results += [pscustomobject]@{ Name = $name; Root = $root }
+            continue
+        }
+
         $s = $entry.ToString().Trim()
         if (-not $s) { continue }
 
@@ -198,34 +377,87 @@ function Resolve-Clients {
 function Initialize-EntityConfig {
     [CmdletBinding()]
     param(
-        [Parameter()][string]$StaticDataFile,
-        [Parameter(Mandatory = $true)][hashtable]$BoundParameters
+        [Parameter(Mandatory = $true)][string]$AppRoot
     )
 
     $config = New-EntityConfig
 
-    # Load config from JSON (if provided, or if default exists).
-    $defaultStaticDataFile = Get-DefaultEntityStaticDataFile
+    # Ensure environment variables used in config imports are available during startup.
+    $utilityHubRoot = Split-Path (Split-Path $AppRoot -Parent) -Parent
+    $env:UTILITY_HUB_ROOT = $utilityHubRoot
+    $env:APP_DIR = $AppRoot
+    $env:UTILS_ROOT = Join-Path $utilityHubRoot 'automations\utils'
 
-    $resolvedStaticDataFile = $null
-    if ($BoundParameters.ContainsKey('StaticDataFile')) {
-        $resolvedStaticDataFile = $StaticDataFile
-    } elseif ($defaultStaticDataFile -and (Test-Path -LiteralPath $defaultStaticDataFile -PathType Leaf)) {
-        $resolvedStaticDataFile = $defaultStaticDataFile
+    function Load-EntityConfigWithImports {
+        param(
+            [Parameter(Mandatory = $true)][string]$Path,
+            [Parameter(Mandatory = $true)][hashtable]$Visited
+        )
+
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+            return $null
+        }
+
+        $resolvedPath = $Path
+        try {
+            $resolvedPath = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
+        } catch {
+            return $null
+        }
+
+        if ($Visited.ContainsKey($resolvedPath)) {
+            return $null
+        }
+        $Visited[$resolvedPath] = $true
+
+        $jsonConfig = $null
+        try {
+            $jsonConfig = Import-EntityConfigJson -Path $resolvedPath
+        } catch {
+            return $null
+        }
+
+        if ($null -eq $jsonConfig) {
+            return $null
+        }
+
+        $merged = New-EntityConfig
+
+        $importSpec = Get-ConfigPropertyValue -Object $jsonConfig -Names @('import')
+        if ($null -ne $importSpec) {
+            $importPath = ([string](Get-ConfigPropertyValue -Object $importSpec -Names @('path')) ?? '').Trim()
+            if ($importPath) {
+                try {
+                    $importPath = $ExecutionContext.InvokeCommand.ExpandString($importPath)
+                } catch {
+                    $importPath = ''
+                }
+
+                if ($importPath) {
+                    if (-not [System.IO.Path]::IsPathRooted($importPath)) {
+                        $importPath = Join-Path (Split-Path -Parent $resolvedPath) $importPath
+                    }
+
+                    $importedConfig = Load-EntityConfigWithImports -Path $importPath -Visited $Visited
+                    if ($null -ne $importedConfig) {
+                        Merge-EntityConfig -Target $merged -Source $importedConfig
+                    }
+                }
+            }
+        }
+
+        Merge-EntityConfig -Target $merged -Source $jsonConfig
+        return $merged
     }
 
-    $resolvedStaticDataFilePath = $null
-    if ($resolvedStaticDataFile) {
-        $resolvedStaticDataFilePath = (Resolve-Path -LiteralPath $resolvedStaticDataFile -ErrorAction Stop).Path
-        $jsonConfig = Import-EntityConfigJson -Path $resolvedStaticDataFilePath
-        Merge-EntityConfig -Target $config -Source $jsonConfig
+    $partiesPath = Get-DefaultEntityPartiesFile -AppRoot $AppRoot
+    $visited = @{}
+    $loadedConfig = Load-EntityConfigWithImports -Path $partiesPath -Visited $visited
+    if ($null -ne $loadedConfig) {
+        Merge-EntityConfig -Target $config -Source $loadedConfig
     }
 
-    return [pscustomobject]@{
-        Config                = $config
-        DefaultStaticDataFile = $defaultStaticDataFile
-        ResolvedStaticDataFile = $resolvedStaticDataFilePath
-    }
+    return [pscustomobject]@{ Config = $config }
 }
 
-Export-ModuleMember -Function Initialize-EntityConfig, Resolve-Clients
+Export-ModuleMember -Function Initialize-EntityConfig, Resolve-Accountants, Resolve-Clients
