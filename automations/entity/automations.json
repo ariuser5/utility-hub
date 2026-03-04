@@ -6,7 +6,7 @@
     },
     {
       "import": {
-        "path": "$env:UTILITY_HUB_ROOT/_submodules/automation-scripts/scripts/export.json"
+        "path": "$env:UTILITY_HUB_ROOT/_submodules/automation-scripts/scripts/automations-meta.json"
       }
     }
   ]
