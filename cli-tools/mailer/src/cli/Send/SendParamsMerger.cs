@@ -23,6 +23,7 @@ internal static class SendParamsMerger
             Subject = fileParams.Subject,
             Body = fileParams.Body,
             BodyFile = fileParams.BodyFile,
+            Tokens = fileParams.Tokens,
             Attachments = fileParams.Attachments,
             IsHtml = fileParams.IsHtml,
         };

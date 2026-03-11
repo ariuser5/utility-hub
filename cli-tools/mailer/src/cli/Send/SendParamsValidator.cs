@@ -20,13 +20,14 @@ internal static class SendParamsValidator
         var isHtml = p.IsHtml ?? false;
 
         if (hasBody)
-            return (p.Body!, isHtml);
+            return (PlaceholderResolver.ResolveText(p.Body!, p.Tokens), isHtml);
 
         var path = p.BodyFile!;
         if (!File.Exists(path))
             throw new FileNotFoundException($"bodyFile does not exist: {path}");
 
         var body = File.ReadAllText(path, Encoding.UTF8);
+        body = PlaceholderResolver.ResolveText(body, p.Tokens);
         return (body, isHtml);
     }
 

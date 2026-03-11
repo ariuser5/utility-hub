@@ -149,6 +149,8 @@ internal static class SendDraftCommandShared
 
     private static async Task<int> RunSendAsync(string? credentialsPath, bool credentialsSpecified, SendParams sendParams, bool createDraft)
     {
+        PlaceholderResolver.ResolveSubjectAndRecipients(sendParams);
+
         try
         {
             SendParamsValidator.ValidateSendParamsOrThrow(sendParams);

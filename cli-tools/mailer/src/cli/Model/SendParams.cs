@@ -8,6 +8,7 @@ internal sealed class SendParams
     public string? Subject { get; set; }
     public string? Body { get; set; }
     public string? BodyFile { get; set; }
+    public Dictionary<string, string>? Tokens { get; set; }
     public List<string>? Attachments { get; set; }
     public bool? IsHtml { get; set; }
 }

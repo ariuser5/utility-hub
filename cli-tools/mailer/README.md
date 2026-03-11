@@ -18,16 +18,23 @@ Auth
 - OAuth attempt times out after 5 minutes.
 
 Send
-- `mailer send [--credentials <path>] [--param-file <path>] --to <email> [--to <email> ...] --subject <text> (--body <text> | --body-file <path>) [--cc <email> ...] [--bcc <email> ...] [--attach <path> ...] [--is-html] [--draft]`
+- `mailer send [--param-file <path>] --to <email> [--to <email> ...] --subject <text> (--body <text> | --body-file <path>) [--cc <email> ...] [--bcc <email> ...] [--attach <path> ...] [--is-html] [--draft] [--credentials <path>]`
 - If not authenticated yet, `send` triggers the same OAuth flow.
 
 Draft
-- `mailer draft [--credentials <path>] [--param-file <path>] --to <email> [--to <email> ...] --subject <text> (--body <text> | --body-file <path>) [--cc <email> ...] [--bcc <email> ...] [--attach <path> ...] [--is-html]`
+- `mailer draft [--param-file <path>] --to <email> [--to <email> ...] --subject <text> (--body <text> | --body-file <path>) [--cc <email> ...] [--bcc <email> ...] [--attach <path> ...] [--is-html] [--credentials <path>]`
 - Creates a draft in your Gmail account; it does not send the email.
 - Success output includes the draft id and a hint to review it in Gmail Drafts.
 
 Param file
-- `--param-file` is a JSON object; CLI flags override values from the file.
+- `--param-file` is a JSON object with send parameters at top level plus `context`.
+- Top-level send parameters: `to`, `cc`, `bcc`, `subject`, `body`/`bodyFile`, `attachments`, `isHtml`; CLI flags override file values when explicitly provided.
+- `context.variables` contains placeholder values.
+- Placeholder substitution applies to `subject`, `to`, `cc`, `bcc`, and body content (`body` or `bodyFile`).
+- Supported placeholder syntax: `{{tokenName}}` and `${tokenName}`.
+- Placeholder values are resolved in this order:
+	1. `context.variables` from `--param-file`
+	2. Environment variables
 
 Example
 ```json
@@ -36,6 +43,14 @@ Example
 	"subject": "Something important",
 	"bodyFile": "C:/temp/message.txt",
 	"attachments": ["C:/temp/report.pdf"],
-	"isHtml": false
+	"isHtml": false,
+	"context": {
+		"variables": {
+			"customerName": "Ari",
+			"orderId": "12345"
+		}
+	}
 }
 ```
+
+If the subject/body/recipient fields contain placeholders like `Hello {{customerName}}` or `${envEmail}`, values are resolved using `context.variables` first, then environment variables when a token is not present in the file.
